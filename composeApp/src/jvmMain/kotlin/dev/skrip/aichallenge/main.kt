@@ -6,11 +6,13 @@ import androidx.compose.ui.window.application
 import androidx.compose.ui.window.rememberWindowState
 
 fun main() = application {
+    val apiKey = System.getenv("ANTHROPIC_API_KEY") ?: ""
+
     Window(
         onCloseRequest = ::exitApplication,
-        title = "Minimal Chat",
-        state = rememberWindowState(width = 500.dp, height = 700.dp)
+        title = "LLM Playground",
+        state = rememberWindowState(width = 1400.dp, height = 900.dp)
     ) {
-        App(getApiKey())
+        App(apiKey)
     }
 }

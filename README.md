@@ -1,48 +1,181 @@
-This is a Kotlin Multiplatform project targeting Android, iOS, Desktop (JVM).
+# LLM Playground
 
-* [/composeApp](./composeApp/src) is for code that will be shared across your Compose Multiplatform applications.
-  It contains several subfolders:
-  - [commonMain](./composeApp/src/commonMain/kotlin) is for code that’s common for all targets.
-  - Other folders are for Kotlin code that will be compiled for only the platform indicated in the folder name.
-    For example, if you want to use Apple’s CoreCrypto for the iOS part of your Kotlin app,
-    the [iosMain](./composeApp/src/iosMain/kotlin) folder would be the right place for such calls.
-    Similarly, if you want to edit the Desktop (JVM) specific part, the [jvmMain](./composeApp/src/jvmMain/kotlin)
-    folder is the appropriate location.
+Учебное desktop-приложение для изучения влияния параметров LLM на ответы через Anthropic API.
 
-* [/iosApp](./iosApp/iosApp) contains iOS applications. Even if you’re sharing your UI with Compose Multiplatform,
-  you need this entry point for your iOS app. This is also where you should add SwiftUI code for your project.
+## Требования
 
-### Build and Run Android Application
+- JDK 11+
+- API ключ Anthropic
 
-To build and run the development version of the Android app, use the run configuration from the run widget
-in your IDE’s toolbar or build it directly from the terminal:
-- on macOS/Linux
-  ```shell
-  ./gradlew :composeApp:assembleDebug
-  ```
-- on Windows
-  ```shell
-  .\gradlew.bat :composeApp:assembleDebug
-  ```
+## Установка API ключа
 
-### Build and Run Desktop (JVM) Application
+Перед запуском установите переменную окружения `ANTHROPIC_API_KEY`:
 
-To build and run the development version of the desktop app, use the run configuration from the run widget
-in your IDE’s toolbar or run it directly from the terminal:
-- on macOS/Linux
-  ```shell
-  ./gradlew :composeApp:run
-  ```
-- on Windows
-  ```shell
-  .\gradlew.bat :composeApp:run
-  ```
+```bash
+# Linux/macOS
+export ANTHROPIC_API_KEY=sk-ant-api03-...
 
-### Build and Run iOS Application
+# Windows PowerShell
+$env:ANTHROPIC_API_KEY="sk-ant-api03-..."
 
-To build and run the development version of the iOS app, use the run configuration from the run widget
-in your IDE’s toolbar or open the [/iosApp](./iosApp) directory in Xcode and run it from there.
+# Windows CMD
+set ANTHROPIC_API_KEY=sk-ant-api03-...
+```
 
----
+## Запуск
 
-Learn more about [Kotlin Multiplatform](https://www.jetbrains.com/help/kotlin-multiplatform-dev/get-started.html)…
+```bash
+./gradlew :composeApp:run
+```
+
+## Архитектура
+
+Проект использует Clean Architecture с тремя слоями:
+
+```
+composeApp/src/commonMain/kotlin/dev/skrip/aichallenge/
+├── domain/           # Бизнес-логика
+│   ├── model/        # Модели данных
+│   ├── repository/   # Интерфейсы репозиториев
+│   └── usecase/      # Use cases
+├── data/             # Реализации работы с данными
+│   ├── AnthropicClient.kt   # HTTP-клиент
+│   ├── AnthropicModels.kt   # DTO для API
+│   ├── LlmRepositoryImpl.kt # Реализация репозитория
+│   └── LogStoreImpl.kt      # Хранилище логов
+├── presentation/     # Состояние UI
+│   ├── MainViewModel.kt
+│   ├── UiState.kt
+│   └── UiEvent.kt
+└── ui/               # Compose UI
+    ├── MainScreen.kt
+    ├── theme/
+    └── components/
+```
+
+## Параметры LLM
+
+### Temperature (Температура)
+
+Контролирует "креативность" модели:
+- **0.0** — строгий, предсказуемый ответ. Модель выбирает наиболее вероятные токены.
+- **1.0** — более разнообразный, креативный ответ. Модель чаще выбирает менее вероятные токены.
+
+**Эксперимент:** Задайте один и тот же вопрос с temperature=0 и temperature=1, сравните ответы.
+
+### Max Tokens (Максимум токенов)
+
+Ограничивает длину ответа в токенах (примерно 4 символа = 1 токен для английского текста):
+- Влияет на стоимость запроса
+- Модель остановится, когда достигнет лимита
+- Не гарантирует минимальную длину
+
+### Stop Sequences (Стоп-последовательности)
+
+Строки, при встрече которых модель прекращает генерацию:
+- Полезно для структурированных ответов
+- Можно использовать для ограничения формата
+- Примеры: `</answer>`, `\n\n`, `END`
+
+### Streaming (Стриминг)
+
+Режим получения ответа:
+- **Выключен** — ответ приходит целиком после завершения генерации
+- **Включён** — ответ приходит по частям по мере генерации
+
+**Применение:** чат-интерфейсы, где важна быстрая обратная связь.
+
+### Маркер конца
+
+Комбинированная техника:
+1. В промпт добавляется инструкция: "Закончи ответ строкой: <END>"
+2. Этот же маркер добавляется в stop_sequences
+
+**Результат:** модель явно обозначает завершение ответа, а затем останавливается.
+
+### Формат ответа
+
+- **Обычный текст** — свободная форма
+- **Markdown-список** — инструкция оформить ответ списком
+- **Строгий JSON** — инструкция вернуть только валидный JSON (с проверкой после ответа)
+
+## Эксперимент: "Без ограничений" vs "С контролем"
+
+### Цель
+Понять, как параметры API влияют на поведение модели.
+
+### Шаги
+
+1. **Введите промпт:**
+   ```
+   Перечисли 5 популярных языков программирования
+   ```
+
+2. **Без ограничений (RAW):**
+   - Модель отвечает в свободной форме
+   - Может добавить пояснения, вступление, заключение
+   - Длина ответа непредсказуема
+
+3. **С контролем:**
+   - Выберите пресет "Ответ списком"
+   - Установите max_tokens = 200
+   - Добавьте стоп-последовательность: `6.`
+
+4. **Сравните результаты:**
+   - Нажмите "Сравнить ответы"
+   - Обратите внимание на структуру и длину
+
+### Что наблюдать
+
+| Параметр | Влияние |
+|----------|---------|
+| Формат | Структура ответа (список/текст/JSON) |
+| Max tokens | Длина ответа обрезается |
+| Stop sequences | Ответ прерывается на указанной строке |
+| Temperature | Вариативность при повторных запросах |
+
+### Эксперимент "Повторить 5 раз"
+
+1. Установите temperature = 1.0
+2. Нажмите "Повторить 5 раз"
+3. Сравните ответы — они будут различаться
+
+4. Установите temperature = 0.0
+5. Повторите — ответы будут почти идентичны
+
+## Изменение моделей
+
+Список доступных моделей находится в файле:
+`domain/model/LlmModels.kt` → `AvailableModels.models`
+
+```kotlin
+object AvailableModels {
+    val models = listOf(
+        "claude-sonnet-4-20250514",
+        "claude-3-5-sonnet-latest",
+        "claude-3-5-haiku-latest",
+        "claude-3-haiku-20240307"
+    )
+}
+```
+
+## Изменение API
+
+Конфигурация API находится в:
+`data/AnthropicClient.kt`
+
+```kotlin
+companion object {
+    private const val BASE_URL = "https://api.anthropic.com/v1/messages"
+    private const val ANTHROPIC_VERSION = "2023-06-01"
+}
+```
+
+## Технологии
+
+- Kotlin 2.3.0
+- Compose Multiplatform 1.10.0 (Desktop)
+- Material 3
+- Ktor Client
+- kotlinx.serialization
+- Coroutines + Flow
