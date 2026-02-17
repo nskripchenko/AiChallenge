@@ -3,14 +3,6 @@ package dev.skrip.aichallenge.presentation
 import dev.skrip.aichallenge.domain.model.*
 
 /**
- * Сообщение в диалоге
- */
-data class ChatMessage(
-    val role: String,  // "user" или "assistant"
-    val content: String
-)
-
-/**
  * Статистика сессии
  */
 data class SessionStats(
@@ -30,7 +22,7 @@ data class UiState(
     val sendToBoth: Boolean = true,
 
     // Multi-turn диалог
-    val conversationHistory: List<ChatMessage> = emptyList(),
+    val conversationHistory: List<ConversationMessage> = emptyList(),
     val isMultiTurnEnabled: Boolean = false,
 
     // История промптов

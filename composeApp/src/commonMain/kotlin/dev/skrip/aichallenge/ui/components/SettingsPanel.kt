@@ -125,7 +125,7 @@ private fun SystemPromptSection(value: String, onChange: (String) -> Unit) {
             textStyle = MaterialTheme.typography.bodySmall
         )
         Text(
-            text = "Применяется к обоим панелям",
+            text = "Только для панели \"С контролем\"",
             style = MaterialTheme.typography.labelSmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant
         )

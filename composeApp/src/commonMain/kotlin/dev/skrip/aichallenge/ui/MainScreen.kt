@@ -85,16 +85,14 @@ private fun ResponseCards(
     state: dev.skrip.aichallenge.presentation.UiState,
     modifier: Modifier = Modifier
 ) {
-    // Raw settings info - показываем понятно
-    val rawSettingsInfo = "temp=${state.rawSettings.temperature.formatDecimal()}, max=${state.rawSettings.maxTokens}, без stop-seq"
+    // Raw settings info
+    val rawSettingsInfo = "temp=${state.rawSettings.temperature.formatDecimal()}, max=${state.rawSettings.maxTokens}"
 
     val controlledSettingsInfo = buildString {
         append("temp=${state.controlledSettings.temperature.formatDecimal()}")
         append(", max=${state.controlledSettings.maxTokens}")
         if (state.controlledSettings.stopSequences.isNotEmpty()) {
             append(", stops: [${state.controlledSettings.stopSequences.joinToString()}]")
-        } else {
-            append(", stops: нет")
         }
     }
 
@@ -102,6 +100,7 @@ private fun ResponseCards(
         modifier = modifier.fillMaxWidth(),
         horizontalArrangement = Arrangement.spacedBy(8.dp)
     ) {
+        // RAW панель - всегда простой ResponseCard
         ResponseCard(
             title = "Без ограничений",
             settingsInfo = rawSettingsInfo,
@@ -110,12 +109,25 @@ private fun ResponseCards(
             modifier = Modifier.weight(1f)
         )
 
-        ResponseCard(
-            title = "С контролем",
-            settingsInfo = controlledSettingsInfo,
-            result = state.controlledResult,
-            status = state.controlledStatus,
-            modifier = Modifier.weight(1f)
-        )
+        // Controlled панель - чат если multi-turn включён
+        if (state.isMultiTurnEnabled) {
+            ChatPanel(
+                title = "С контролем (чат)",
+                settingsInfo = controlledSettingsInfo,
+                conversationHistory = state.conversationHistory,
+                currentResponse = state.controlledResult.text,
+                isStreaming = state.controlledStatus == dev.skrip.aichallenge.domain.model.RequestStatus.STREAMING,
+                latencyMs = state.controlledResult.latencyMs,
+                modifier = Modifier.weight(1f)
+            )
+        } else {
+            ResponseCard(
+                title = "С контролем",
+                settingsInfo = controlledSettingsInfo,
+                result = state.controlledResult,
+                status = state.controlledStatus,
+                modifier = Modifier.weight(1f)
+            )
+        }
     }
 }

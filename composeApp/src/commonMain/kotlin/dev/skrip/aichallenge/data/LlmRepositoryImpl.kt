@@ -1,5 +1,6 @@
 package dev.skrip.aichallenge.data
 
+import dev.skrip.aichallenge.domain.model.ConversationMessage
 import dev.skrip.aichallenge.domain.model.LlmRequestConfig
 import dev.skrip.aichallenge.domain.model.LlmResult
 import dev.skrip.aichallenge.domain.repository.LlmRepository
@@ -14,9 +15,12 @@ class LlmRepositoryImpl(
     override suspend fun sendPrompt(prompt: String, config: LlmRequestConfig): LlmResult {
         val startTime = Clock.System.now().toEpochMilliseconds()
 
+        // Собираем сообщения: история + текущий промпт
+        val messages = buildMessages(config.conversationHistory, prompt)
+
         val request = AnthropicRequest(
             model = config.model,
-            messages = listOf(AnthropicMessage(role = "user", content = prompt)),
+            messages = messages,
             maxTokens = config.maxTokens,
             system = config.systemPrompt.takeIf { it.isNotBlank() }?.let {
                 listOf(ContentBlock(type = "text", text = it))
@@ -64,9 +68,12 @@ class LlmRepositoryImpl(
         var inputTokens: Int? = null
         var outputTokens: Int? = null
 
+        // Собираем сообщения: история + текущий промпт
+        val messages = buildMessages(config.conversationHistory, prompt)
+
         val request = AnthropicRequest(
             model = config.model,
-            messages = listOf(AnthropicMessage(role = "user", content = prompt)),
+            messages = messages,
             maxTokens = config.maxTokens,
             system = config.systemPrompt.takeIf { it.isNotBlank() }?.let {
                 listOf(ContentBlock(type = "text", text = it))
@@ -128,5 +135,19 @@ class LlmRepositoryImpl(
                 }
             }
         }
+    }
+
+    private fun buildMessages(history: List<ConversationMessage>, currentPrompt: String): List<AnthropicMessage> {
+        val messages = mutableListOf<AnthropicMessage>()
+
+        // Добавляем историю
+        history.forEach { msg ->
+            messages.add(AnthropicMessage(role = msg.role, content = msg.content))
+        }
+
+        // Добавляем текущий промпт
+        messages.add(AnthropicMessage(role = "user", content = currentPrompt))
+
+        return messages
     }
 }

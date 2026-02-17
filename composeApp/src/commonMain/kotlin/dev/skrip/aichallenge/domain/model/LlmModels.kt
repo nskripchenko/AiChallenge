@@ -37,6 +37,14 @@ object AvailableModels {
 }
 
 /**
+ * Сообщение в диалоге
+ */
+data class ConversationMessage(
+    val role: String,  // "user" или "assistant"
+    val content: String
+)
+
+/**
  * Конфигурация запроса к LLM
  */
 data class LlmRequestConfig(
@@ -46,7 +54,8 @@ data class LlmRequestConfig(
     val topP: Float? = null,
     val maxTokens: Int = 1024,
     val stopSequences: List<String> = emptyList(),
-    val streaming: Boolean = false
+    val streaming: Boolean = false,
+    val conversationHistory: List<ConversationMessage> = emptyList()
 )
 
 /**

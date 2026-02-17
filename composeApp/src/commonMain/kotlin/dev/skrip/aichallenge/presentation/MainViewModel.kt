@@ -83,8 +83,16 @@ class MainViewModel(
         // Добавляем в историю промптов
         addToHistory(prompt)
 
-        val controlledConfig = state.controlledSettings.toConfig(systemPrompt)
-        val rawConfig = state.rawSettings.toConfig(state.controlledSettings.model, systemPrompt)
+        // История диалога для multi-turn
+        val history = if (state.isMultiTurnEnabled) state.conversationHistory else emptyList()
+
+        val controlledConfig = state.controlledSettings.toConfig(systemPrompt).copy(
+            conversationHistory = history
+        )
+        // RAW - без system prompt, без истории
+        val rawConfig = state.rawSettings.toConfig(state.controlledSettings.model, "").copy(
+            conversationHistory = emptyList()
+        )
 
         if (state.sendToBoth) {
             sendBoth(prompt, rawConfig, controlledConfig)
@@ -220,8 +228,8 @@ class MainViewModel(
 
         _uiState.update { state ->
             val newHistory = state.conversationHistory +
-                    ChatMessage("user", prompt) +
-                    ChatMessage("assistant", result.text)
+                    ConversationMessage("user", prompt) +
+                    ConversationMessage("assistant", result.text)
             state.copy(conversationHistory = newHistory)
         }
     }
