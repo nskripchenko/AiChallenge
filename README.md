@@ -1,48 +1,80 @@
-This is a Kotlin Multiplatform project targeting Android, iOS, Desktop (JVM).
+# AI Reasoning Lab
 
-* [/composeApp](./composeApp/src) is for code that will be shared across your Compose Multiplatform applications.
-  It contains several subfolders:
-  - [commonMain](./composeApp/src/commonMain/kotlin) is for code that’s common for all targets.
-  - Other folders are for Kotlin code that will be compiled for only the platform indicated in the folder name.
-    For example, if you want to use Apple’s CoreCrypto for the iOS part of your Kotlin app,
-    the [iosMain](./composeApp/src/iosMain/kotlin) folder would be the right place for such calls.
-    Similarly, if you want to edit the Desktop (JVM) specific part, the [jvmMain](./composeApp/src/jvmMain/kotlin)
-    folder is the appropriate location.
+Учебное приложение для сравнения 4 стратегий промптинга на одной задаче.
 
-* [/iosApp](./iosApp/iosApp) contains iOS applications. Even if you’re sharing your UI with Compose Multiplatform,
-  you need this entry point for your iOS app. This is also where you should add SwiftUI code for your project.
+## Описание
 
-### Build and Run Android Application
+AI Reasoning Lab позволяет экспериментировать с различными подходами к формулировке промптов и сравнивать качество ответов AI моделей.
 
-To build and run the development version of the Android app, use the run configuration from the run widget
-in your IDE’s toolbar or build it directly from the terminal:
-- on macOS/Linux
-  ```shell
-  ./gradlew :composeApp:assembleDebug
-  ```
-- on Windows
-  ```shell
-  .\gradlew.bat :composeApp:assembleDebug
-  ```
+## 4 режима рассуждения
 
-### Build and Run Desktop (JVM) Application
+1. **Напрямую (Direct)** - задача передаётся модели как есть, без дополнительных инструкций
+2. **Пошагово (Step-by-Step)** - к задаче добавляется инструкция решать пошагово с анализом
+3. **Сначала промпт (Prompt First)** - сначала AI генерирует оптимальный промпт, затем решает задачу по этому промпту (2 API-запроса)
+4. **Эксперты (Experts)** - задача решается "советом" из трёх экспертов: Аналитика, Стратега и Критика
 
-To build and run the development version of the desktop app, use the run configuration from the run widget
-in your IDE’s toolbar or run it directly from the terminal:
-- on macOS/Linux
-  ```shell
-  ./gradlew :composeApp:run
-  ```
-- on Windows
-  ```shell
-  .\gradlew.bat :composeApp:run
-  ```
+## Как запустить
 
-### Build and Run iOS Application
+### 1. Установите API ключ
 
-To build and run the development version of the iOS app, use the run configuration from the run widget
-in your IDE’s toolbar or open the [/iosApp](./iosApp) directory in Xcode and run it from there.
+Установите переменную окружения `ANTHROPIC_API_KEY`:
+
+```bash
+# macOS/Linux
+export ANTHROPIC_API_KEY="your-api-key-here"
+
+# Windows (PowerShell)
+$env:ANTHROPIC_API_KEY="your-api-key-here"
+
+# Windows (CMD)
+set ANTHROPIC_API_KEY=your-api-key-here
+```
+
+### 2. Запустите приложение
+
+```bash
+# macOS/Linux
+./gradlew :composeApp:run
+
+# Windows
+.\gradlew.bat :composeApp:run
+```
+
+## Использование
+
+1. Введите задачу в текстовое поле или выберите одну из готовых задач
+2. Выберите модель Claude (по умолчанию - самая дешёвая)
+3. Опционально включите "Показать промпты" для просмотра сгенерированных промптов
+4. Нажмите "Запустить сравнение"
+5. Сравните ответы 4 режимов и отметьте, какие из них дали правильный ответ
+
+## Доступные модели
+
+- **Claude 3.5 Haiku** - самая быстрая и дешёвая (cost rank: 1)
+- **Claude 3.5 Sonnet** - баланс качества и скорости (cost rank: 2)
+- **Claude Sonnet 4** - высокое качество (cost rank: 3)
+
+## Архитектура проекта
+
+```
+composeApp/src/
+├── commonMain/kotlin/dev/skrip/aichallenge/
+│   ├── model/           # Модели данных
+│   ├── prompts/         # Генерация промптов
+│   ├── api/             # HTTP клиент для Anthropic API
+│   └── runner/          # Логика запуска сравнения
+└── jvmMain/kotlin/dev/skrip/aichallenge/
+    ├── main.kt          # Entry point
+    └── ui/              # Compose UI компоненты
+```
+
+## Технический стек
+
+- Kotlin Multiplatform
+- Compose Multiplatform (Desktop)
+- Ktor Client
+- Kotlinx Serialization
 
 ---
 
-Learn more about [Kotlin Multiplatform](https://www.jetbrains.com/help/kotlin-multiplatform-dev/get-started.html)…
+Learn more about [Kotlin Multiplatform](https://www.jetbrains.com/help/kotlin-multiplatform-dev/get-started.html)
