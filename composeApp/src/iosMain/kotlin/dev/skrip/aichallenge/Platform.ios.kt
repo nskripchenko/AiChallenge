@@ -1,5 +1,6 @@
 package dev.skrip.aichallenge
 
+import platform.Foundation.NSProcessInfo
 import platform.UIKit.UIDevice
 
 class IOSPlatform: Platform {
@@ -7,3 +8,9 @@ class IOSPlatform: Platform {
 }
 
 actual fun getPlatform(): Platform = IOSPlatform()
+
+actual fun getEnvApiKey(): String? = NSProcessInfo.processInfo.environment["ANTHROPIC_API_KEY"] as? String
+
+actual fun copyToClipboard(text: String) {
+    platform.UIKit.UIPasteboard.generalPasteboard.string = text
+}

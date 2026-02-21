@@ -5,3 +5,7 @@ interface Platform {
 }
 
 expect fun getPlatform(): Platform
+
+expect fun getEnvApiKey(): String?
+
+expect fun copyToClipboard(text: String)

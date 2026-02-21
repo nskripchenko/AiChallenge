@@ -7,3 +7,9 @@ class AndroidPlatform : Platform {
 }
 
 actual fun getPlatform(): Platform = AndroidPlatform()
+
+actual fun getEnvApiKey(): String? = System.getenv("ANTHROPIC_API_KEY")
+
+actual fun copyToClipboard(text: String) {
+    // На Android нужен Context, пока заглушка
+}
