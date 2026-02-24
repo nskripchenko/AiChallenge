@@ -42,3 +42,30 @@ data class AnthropicError(
     val type: String,
     val message: String
 )
+
+// Streaming event types
+@Serializable
+data class StreamEvent(
+    val type: String,
+    val index: Int? = null,
+    val delta: StreamDelta? = null,
+    val message: StreamMessage? = null,
+    val usage: Usage? = null
+)
+
+@Serializable
+data class StreamDelta(
+    val type: String,
+    val text: String? = null,
+    @SerialName("stop_reason")
+    val stopReason: String? = null
+)
+
+@Serializable
+data class StreamMessage(
+    val id: String,
+    val type: String,
+    val role: String,
+    val model: String,
+    val usage: Usage? = null
+)

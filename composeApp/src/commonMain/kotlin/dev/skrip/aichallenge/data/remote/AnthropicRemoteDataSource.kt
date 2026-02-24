@@ -4,7 +4,9 @@ import dev.skrip.aichallenge.data.remote.dto.AnthropicErrorResponse
 import dev.skrip.aichallenge.data.remote.dto.AnthropicMessage
 import dev.skrip.aichallenge.data.remote.dto.AnthropicRequest
 import dev.skrip.aichallenge.data.remote.dto.AnthropicResponse
+import dev.skrip.aichallenge.data.remote.dto.StreamEvent
 import dev.skrip.aichallenge.data.source.LlmDataSource
+import dev.skrip.aichallenge.data.source.StreamingEvent
 import dev.skrip.aichallenge.domain.model.Message
 import dev.skrip.aichallenge.domain.model.ModelId
 import dev.skrip.aichallenge.domain.model.Role
@@ -17,11 +19,16 @@ import dev.skrip.aichallenge.util.getEnvVariable
 import io.ktor.client.HttpClient
 import io.ktor.client.request.headers
 import io.ktor.client.request.post
+import io.ktor.client.request.preparePost
 import io.ktor.client.request.setBody
+import io.ktor.client.statement.bodyAsChannel
 import io.ktor.client.statement.bodyAsText
 import io.ktor.http.ContentType
 import io.ktor.http.HttpStatusCode
 import io.ktor.http.contentType
+import io.ktor.utils.io.readUTF8Line
+import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.flow
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
 
@@ -111,6 +118,112 @@ class AnthropicRemoteDataSource(
             if (error !is Exception || !error.message.orEmpty().startsWith("HTTP")) {
                 logError(error.message ?: "Unknown error", error.stackTraceToString())
             }
+        }
+    }
+
+    override fun sendMessageStreaming(
+        messages: List<Message>,
+        model: String,
+        temperature: Double,
+        maxTokens: Int
+    ): Flow<StreamingEvent> = flow {
+        val systemMessage = messages.find { it.role == Role.SYSTEM }
+        val conversationMessages = messages.filter { it.role != Role.SYSTEM }
+
+        val request = AnthropicRequest(
+            model = model,
+            maxTokens = maxTokens,
+            temperature = temperature,
+            system = systemMessage?.text,
+            messages = conversationMessages.map { it.toAnthropicMessage() },
+            stream = true
+        )
+
+        val requestJson = json.encodeToString(request)
+        logRequest(model, temperature, maxTokens, requestJson)
+
+        val startTime = currentTimeMillis()
+        var inputTokens = 0
+        var outputTokens = 0
+
+        try {
+            httpClient.preparePost(ANTHROPIC_API_URL) {
+                contentType(ContentType.Application.Json)
+                headers {
+                    append("x-api-key", apiKey)
+                    append("anthropic-version", ANTHROPIC_VERSION)
+                }
+                setBody(request)
+            }.execute { response ->
+                if (response.status != HttpStatusCode.OK) {
+                    val errorBody = response.bodyAsText()
+                    val errorMessage = runCatching {
+                        val errorResponse = json.decodeFromString<AnthropicErrorResponse>(errorBody)
+                        "${errorResponse.error.type}: ${errorResponse.error.message}"
+                    }.getOrElse { "HTTP ${response.status.value}" }
+                    logError(errorMessage, errorBody)
+                    emit(StreamingEvent.Error(errorMessage))
+                    return@execute
+                }
+
+                val channel = response.bodyAsChannel()
+                var currentData = StringBuilder()
+
+                while (!channel.isClosedForRead) {
+                    val line = channel.readUTF8Line() ?: break
+
+                    when {
+                        line.startsWith("data: ") -> {
+                            currentData.append(line.removePrefix("data: "))
+                        }
+                        line.isEmpty() && currentData.isNotEmpty() -> {
+                            val dataStr = currentData.toString().trim()
+                            currentData = StringBuilder()
+
+                            if (dataStr == "[DONE]") continue
+
+                            runCatching {
+                                val event = json.decodeFromString<StreamEvent>(dataStr)
+
+                                when (event.type) {
+                                    "message_start" -> {
+                                        event.message?.usage?.let {
+                                            inputTokens = it.inputTokens
+                                        }
+                                    }
+                                    "content_block_delta" -> {
+                                        event.delta?.text?.let { text ->
+                                            emit(StreamingEvent.TextDelta(text))
+                                        }
+                                    }
+                                    "message_delta" -> {
+                                        event.usage?.let {
+                                            outputTokens = it.outputTokens
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+
+                val responseTimeMs = currentTimeMillis() - startTime
+                val modelId = ModelId.fromApiId(model) ?: ModelId.SONNET
+
+                logResponse("{\"streaming\": true, \"input_tokens\": $inputTokens, \"output_tokens\": $outputTokens}")
+
+                emit(StreamingEvent.Complete(
+                    TokenUsage(
+                        inputTokens = inputTokens,
+                        outputTokens = outputTokens,
+                        responseTimeMs = responseTimeMs,
+                        model = modelId
+                    )
+                ))
+            }
+        } catch (e: Exception) {
+            logError(e.message ?: "Unknown error", e.stackTraceToString())
+            emit(StreamingEvent.Error(e.message ?: "Unknown error"))
         }
     }
 

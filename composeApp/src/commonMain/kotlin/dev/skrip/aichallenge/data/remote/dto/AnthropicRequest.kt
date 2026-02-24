@@ -10,7 +10,8 @@ data class AnthropicRequest(
     val maxTokens: Int,
     val temperature: Double,
     val system: String? = null,
-    val messages: List<AnthropicMessage>
+    val messages: List<AnthropicMessage>,
+    val stream: Boolean = false
 )
 
 @Serializable

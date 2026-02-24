@@ -1,5 +1,8 @@
 package dev.skrip.aichallenge.domain.model
 
+import kotlinx.serialization.Serializable
+
+@Serializable
 data class Message(
     val id: String,
     val role: Role,
@@ -8,6 +11,7 @@ data class Message(
     val usage: TokenUsage? = null
 )
 
+@Serializable
 data class TokenUsage(
     val inputTokens: Int,
     val outputTokens: Int,

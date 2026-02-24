@@ -1,5 +1,8 @@
 package dev.skrip.aichallenge.domain.model
 
+import kotlinx.serialization.Serializable
+
+@Serializable
 enum class ModelId(
     val apiId: String,
     val label: String,

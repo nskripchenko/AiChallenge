@@ -33,6 +33,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import dev.skrip.aichallenge.domain.model.ModelId
+import dev.skrip.aichallenge.ui.state.SessionStats
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -44,6 +45,7 @@ fun AgentSettingsPanel(
     historyTokenLimitText: String,
     estimatedHistoryTokens: Int,
     historyTokensRemaining: Int,
+    sessionStats: SessionStats,
     onSystemPromptChanged: (String) -> Unit,
     onModelChanged: (ModelId) -> Unit,
     onTemperatureChanged: (String) -> Unit,
@@ -76,11 +78,7 @@ fun AgentSettingsPanel(
             modifier = Modifier
                 .fillMaxWidth()
                 .background(
-                    color = when {
-                        usageRatio > 0.9f -> Color(0xFFFFEBEE)
-                        usageRatio > 0.7f -> Color(0xFFFFF3E0)
-                        else -> Color(0xFFE8F5E9)
-                    },
+                    color = Color(0xFFF5F5F5),
                     shape = RoundedCornerShape(8.dp)
                 )
                 .padding(12.dp)
@@ -98,7 +96,7 @@ fun AgentSettingsPanel(
                 TextButton(
                     onClick = onClearHistory,
                     colors = ButtonDefaults.textButtonColors(
-                        contentColor = MaterialTheme.colorScheme.error
+                        contentColor = Color(0xFF616161)
                     )
                 ) {
                     Text("Clear", fontSize = 12.sp)
@@ -111,13 +109,9 @@ fun AgentSettingsPanel(
                 progress = { usageRatio },
                 modifier = Modifier
                     .fillMaxWidth()
-                    .height(8.dp),
-                color = when {
-                    usageRatio > 0.9f -> Color(0xFFF44336)
-                    usageRatio > 0.7f -> Color(0xFFFF9800)
-                    else -> Color(0xFF4CAF50)
-                },
-                trackColor = Color.White.copy(alpha = 0.5f)
+                    .height(4.dp),
+                color = Color(0xFF424242),
+                trackColor = Color(0xFFE0E0E0)
             )
 
             Spacer(modifier = Modifier.height(8.dp))
@@ -129,17 +123,110 @@ fun AgentSettingsPanel(
                 Text(
                     text = "Used: $estimatedHistoryTokens",
                     fontSize = 11.sp,
-                    color = Color.DarkGray
+                    color = Color(0xFF757575)
                 )
                 Text(
                     text = "Remaining: $historyTokensRemaining",
                     fontSize = 11.sp,
-                    color = if (historyTokensRemaining < 500) Color(0xFFF44336) else Color.DarkGray
+                    color = Color(0xFF757575)
                 )
             }
         }
 
         Spacer(modifier = Modifier.height(12.dp))
+
+        // Session Statistics Card
+        if (sessionStats.exchangeCount > 0) {
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .background(
+                        color = Color(0xFFF5F5F5),
+                        shape = RoundedCornerShape(8.dp)
+                    )
+                    .padding(12.dp)
+            ) {
+                Text(
+                    text = "Session Statistics",
+                    style = MaterialTheme.typography.labelMedium,
+                    fontWeight = FontWeight.Bold,
+                    modifier = Modifier.padding(bottom = 8.dp)
+                )
+
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween
+                ) {
+                    Column {
+                        Text(
+                            text = "Tokens",
+                            fontSize = 10.sp,
+                            color = Color(0xFF9E9E9E)
+                        )
+                        Text(
+                            text = "${sessionStats.totalTokens}",
+                            fontSize = 14.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = Color(0xFF212121)
+                        )
+                        Text(
+                            text = "${sessionStats.totalInputTokens} in / ${sessionStats.totalOutputTokens} out",
+                            fontSize = 9.sp,
+                            color = Color(0xFF9E9E9E)
+                        )
+                    }
+                    Column(horizontalAlignment = Alignment.End) {
+                        Text(
+                            text = "Cost",
+                            fontSize = 10.sp,
+                            color = Color(0xFF9E9E9E)
+                        )
+                        Text(
+                            text = formatSessionCost(sessionStats.totalCostUsd),
+                            fontSize = 14.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = Color(0xFF212121)
+                        )
+                    }
+                }
+
+                Spacer(modifier = Modifier.height(8.dp))
+
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween
+                ) {
+                    Column {
+                        Text(
+                            text = "Avg Response",
+                            fontSize = 10.sp,
+                            color = Color(0xFF9E9E9E)
+                        )
+                        Text(
+                            text = "%.2fs".format(sessionStats.avgResponseTimeSec),
+                            fontSize = 14.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = Color(0xFF212121)
+                        )
+                    }
+                    Column(horizontalAlignment = Alignment.End) {
+                        Text(
+                            text = "Exchanges",
+                            fontSize = 10.sp,
+                            color = Color(0xFF9E9E9E)
+                        )
+                        Text(
+                            text = "${sessionStats.exchangeCount}",
+                            fontSize = 14.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = Color(0xFF212121)
+                        )
+                    }
+                }
+            }
+
+            Spacer(modifier = Modifier.height(12.dp))
+        }
 
         Text(
             text = "History Token Limit",
@@ -243,5 +330,14 @@ fun AgentSettingsPanel(
                 )
             }
         }
+    }
+}
+
+private fun formatSessionCost(cost: Double): String {
+    return when {
+        cost < 0.0001 -> "<$0.0001"
+        cost < 0.01 -> "$%.4f".format(cost)
+        cost < 1.0 -> "$%.3f".format(cost)
+        else -> "$%.2f".format(cost)
     }
 }

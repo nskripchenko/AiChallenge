@@ -4,6 +4,7 @@ import dev.skrip.aichallenge.domain.model.ModelId
 
 sealed class ChatViewEvent {
     data object SendClicked : ChatViewEvent()
+    data object StopGeneration : ChatViewEvent()
     data object ClearHistory : ChatViewEvent()
     data class InputChanged(val text: String) : ChatViewEvent()
     data class TemperatureChanged(val text: String) : ChatViewEvent()

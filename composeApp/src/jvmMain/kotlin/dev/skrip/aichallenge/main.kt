@@ -5,6 +5,7 @@ import androidx.compose.ui.window.application
 import androidx.compose.ui.window.rememberWindowState
 import androidx.compose.ui.unit.dp
 import dev.skrip.aichallenge.di.appModules
+import dev.skrip.aichallenge.di.jvmModule
 import dev.skrip.aichallenge.ui.ChatApp
 import dev.skrip.aichallenge.ui.viewmodel.ChatViewModel
 import org.koin.core.context.startKoin
@@ -12,7 +13,7 @@ import org.koin.java.KoinJavaComponent.get
 
 fun main() {
     startKoin {
-        modules(appModules)
+        modules(appModules + jvmModule)
     }
 
     application {

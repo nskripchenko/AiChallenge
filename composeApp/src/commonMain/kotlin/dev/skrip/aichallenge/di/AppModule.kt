@@ -38,7 +38,7 @@ val dataModule = module {
 }
 
 val viewModelModule = module {
-    single { ChatViewModel(get(), get()) }
+    single { ChatViewModel(get(), get(), get()) }
 }
 
 val appModules = listOf(networkModule, dataModule, viewModelModule)

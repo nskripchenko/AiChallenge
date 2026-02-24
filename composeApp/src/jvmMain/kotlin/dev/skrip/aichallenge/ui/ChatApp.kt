@@ -1,49 +1,88 @@
 package dev.skrip.aichallenge.ui
 
+import androidx.compose.foundation.background
+import androidx.compose.foundation.gestures.detectDragGestures
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.width
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
-import androidx.compose.material3.VerticalDivider
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.input.pointer.PointerIcon
+import androidx.compose.ui.input.pointer.pointerHoverIcon
+import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.unit.dp
 import dev.skrip.aichallenge.ui.state.ChatViewEvent
 import dev.skrip.aichallenge.ui.viewmodel.ChatViewModel
+import java.awt.Cursor
 
 @Composable
 fun ChatApp(viewModel: ChatViewModel) {
     val uiState by viewModel.uiState.collectAsState()
     val logs by viewModel.logs.collectAsState()
 
+    var totalWidth by remember { mutableStateOf(0f) }
+    var logPanelWeight by remember { mutableStateOf(0.25f) }
+    var chatPanelWeight by remember { mutableStateOf(0.5f) }
+    val settingsPanelWeight = 1f - logPanelWeight - chatPanelWeight
+
     MaterialTheme {
-        Surface(modifier = Modifier.fillMaxSize()) {
+        Surface(
+            modifier = Modifier
+                .fillMaxSize()
+                .onSizeChanged { totalWidth = it.width.toFloat() }
+        ) {
             Row(modifier = Modifier.fillMaxSize()) {
                 LogPanel(
                     logs = logs,
-                    modifier = Modifier.weight(1f)
+                    modifier = Modifier.weight(logPanelWeight)
                 )
-                VerticalDivider(
-                    modifier = Modifier.fillMaxHeight().width(1.dp),
-                    color = MaterialTheme.colorScheme.outline
+
+                DraggableDivider(
+                    onDrag = { delta ->
+                        val deltaWeight = delta / totalWidth
+                        val newLogWeight = (logPanelWeight + deltaWeight).coerceIn(0.1f, 0.5f)
+                        val newChatWeight = (chatPanelWeight - deltaWeight).coerceIn(0.2f, 0.7f)
+                        if (newLogWeight + newChatWeight + settingsPanelWeight <= 1f) {
+                            logPanelWeight = newLogWeight
+                            chatPanelWeight = newChatWeight
+                        }
+                    }
                 )
+
                 ChatPanel(
                     messages = uiState.messages,
                     inputText = uiState.inputText,
                     isLoading = uiState.isLoading,
+                    isStreaming = uiState.isStreaming,
+                    streamingText = uiState.streamingText,
                     errorMessage = uiState.errorMessage,
                     onInputChanged = { viewModel.onEvent(ChatViewEvent.InputChanged(it)) },
                     onSendClicked = { viewModel.onEvent(ChatViewEvent.SendClicked) },
-                    modifier = Modifier.weight(1f)
+                    onStopClicked = { viewModel.onEvent(ChatViewEvent.StopGeneration) },
+                    modifier = Modifier.weight(chatPanelWeight)
                 )
-                VerticalDivider(
-                    modifier = Modifier.fillMaxHeight().width(1.dp),
-                    color = MaterialTheme.colorScheme.outline
+
+                DraggableDivider(
+                    onDrag = { delta ->
+                        val deltaWeight = delta / totalWidth
+                        val newChatWeight = (chatPanelWeight + deltaWeight).coerceIn(0.2f, 0.7f)
+                        val newSettingsWeight = (settingsPanelWeight - deltaWeight).coerceIn(0.15f, 0.4f)
+                        if (logPanelWeight + newChatWeight + newSettingsWeight <= 1f) {
+                            chatPanelWeight = newChatWeight
+                        }
+                    }
                 )
+
                 AgentSettingsPanel(
                     systemPrompt = uiState.systemPromptText,
                     selectedModel = uiState.selectedModel,
@@ -52,15 +91,33 @@ fun ChatApp(viewModel: ChatViewModel) {
                     historyTokenLimitText = uiState.historyTokenLimitText,
                     estimatedHistoryTokens = uiState.estimatedHistoryTokens,
                     historyTokensRemaining = uiState.historyTokensRemaining,
+                    sessionStats = uiState.sessionStats,
                     onSystemPromptChanged = { viewModel.onEvent(ChatViewEvent.SystemPromptChanged(it)) },
                     onModelChanged = { viewModel.onEvent(ChatViewEvent.ModelChanged(it)) },
                     onTemperatureChanged = { viewModel.onEvent(ChatViewEvent.TemperatureChanged(it)) },
                     onMaxTokensChanged = { viewModel.onEvent(ChatViewEvent.MaxTokensChanged(it)) },
                     onHistoryTokenLimitChanged = { viewModel.onEvent(ChatViewEvent.HistoryTokenLimitChanged(it)) },
                     onClearHistory = { viewModel.onEvent(ChatViewEvent.ClearHistory) },
-                    modifier = Modifier.weight(1f)
+                    modifier = Modifier.weight(settingsPanelWeight)
                 )
             }
         }
     }
+}
+
+@Composable
+private fun DraggableDivider(onDrag: (Float) -> Unit) {
+    Box(
+        modifier = Modifier
+            .width(6.dp)
+            .fillMaxHeight()
+            .background(MaterialTheme.colorScheme.outline.copy(alpha = 0.3f))
+            .pointerHoverIcon(PointerIcon(Cursor(Cursor.E_RESIZE_CURSOR)))
+            .pointerInput(Unit) {
+                detectDragGestures { change, dragAmount ->
+                    change.consume()
+                    onDrag(dragAmount.x)
+                }
+            }
+    )
 }

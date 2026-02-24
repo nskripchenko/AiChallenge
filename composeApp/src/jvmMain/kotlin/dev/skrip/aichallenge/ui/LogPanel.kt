@@ -144,26 +144,26 @@ private data class LogEntryStyle(
 
 private fun LogEntry.toStyle(): LogEntryStyle = when (this) {
     is LogEntry.Request -> LogEntryStyle(
-        backgroundColor = Color(0xFFE3F2FD),
+        backgroundColor = Color(0xFFF5F5F5),
         label = "REQUEST",
-        labelColor = Color(0xFF1565C0),
+        labelColor = Color(0xFF424242),
         summary = "Model: $model | Temp: $temperature | MaxTokens: $maxTokens",
         content = requestJson
     )
     is LogEntry.Response -> LogEntryStyle(
-        backgroundColor = Color(0xFFE8F5E9),
+        backgroundColor = Color(0xFFEEEEEE),
         label = "RESPONSE",
-        labelColor = Color(0xFF2E7D32),
+        labelColor = Color(0xFF616161),
         summary = "Response received",
         content = responseJson
     )
     is LogEntry.Error -> LogEntryStyle(
-        backgroundColor = Color(0xFFFFEBEE),
+        backgroundColor = Color(0xFFE0E0E0),
         label = "ERROR",
-        labelColor = Color(0xFFC62828),
+        labelColor = Color(0xFF212121),
         summary = errorMessage,
         content = details ?: "No additional details",
-        contentColor = Color(0xFFC62828)
+        contentColor = Color(0xFF424242)
     )
 }
 

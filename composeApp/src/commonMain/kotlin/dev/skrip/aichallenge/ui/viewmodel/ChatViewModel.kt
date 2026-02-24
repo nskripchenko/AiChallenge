@@ -1,9 +1,11 @@
 package dev.skrip.aichallenge.ui.viewmodel
 
+import dev.skrip.aichallenge.data.source.StreamingEvent
 import dev.skrip.aichallenge.domain.model.AgentConfig
 import dev.skrip.aichallenge.domain.model.Message
 import dev.skrip.aichallenge.domain.model.Role
 import dev.skrip.aichallenge.domain.repository.ChatAgent
+import dev.skrip.aichallenge.domain.repository.ChatHistoryStorage
 import dev.skrip.aichallenge.logging.AgentLogger
 import dev.skrip.aichallenge.logging.LogEntry
 import dev.skrip.aichallenge.ui.state.ChatUiState
@@ -13,6 +15,7 @@ import dev.skrip.aichallenge.util.estimateTokens
 import dev.skrip.aichallenge.util.generateId
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -22,7 +25,8 @@ import kotlinx.coroutines.launch
 
 class ChatViewModel(
     private val chatAgent: ChatAgent,
-    agentLogger: AgentLogger
+    agentLogger: AgentLogger,
+    private val historyStorage: ChatHistoryStorage
 ) {
     private val viewModelScope = CoroutineScope(SupervisorJob() + Dispatchers.Main)
 
@@ -30,6 +34,27 @@ class ChatViewModel(
     val uiState: StateFlow<ChatUiState> = _uiState.asStateFlow()
 
     val logs: StateFlow<List<LogEntry>> = agentLogger.logs
+
+    private var streamingJob: Job? = null
+
+    init {
+        loadHistory()
+    }
+
+    private fun loadHistory() {
+        viewModelScope.launch {
+            val messages = historyStorage.loadHistory()
+            if (messages.isNotEmpty()) {
+                updateState { copy(messages = messages) }
+            }
+        }
+    }
+
+    private fun saveHistory() {
+        viewModelScope.launch {
+            historyStorage.saveHistory(_uiState.value.messages)
+        }
+    }
 
     fun onEvent(event: ChatViewEvent) {
         when (event) {
@@ -39,7 +64,8 @@ class ChatViewModel(
             is ChatViewEvent.MaxTokensChanged -> updateState { copy(maxTokensText = event.text) }
             is ChatViewEvent.ModelChanged -> updateState { copy(selectedModel = event.model) }
             is ChatViewEvent.HistoryTokenLimitChanged -> updateState { copy(historyTokenLimitText = event.text) }
-            is ChatViewEvent.ClearHistory -> updateState { copy(messages = emptyList(), errorMessage = null) }
+            is ChatViewEvent.ClearHistory -> clearHistory()
+            is ChatViewEvent.StopGeneration -> stopGeneration()
             is ChatViewEvent.SendClicked -> handleSendClicked()
         }
     }
@@ -52,10 +78,12 @@ class ChatViewModel(
         val currentState = _uiState.value
         val userMessageText = currentState.inputText.trim()
 
-        if (userMessageText.isBlank() || currentState.isLoading) return
+        if (userMessageText.isBlank() || currentState.isLoading || currentState.isStreaming) return
 
         val config = buildAgentConfig(currentState)
         val userMessage = createUserMessage(userMessageText)
+        val assistantMessageId = generateId()
+        val startTime = currentTimeMillis()
 
         // Trim history to fit token limit
         val trimmedHistory = trimHistoryToTokenLimit(
@@ -68,33 +96,91 @@ class ChatViewModel(
                 messages = messages + userMessage,
                 inputText = "",
                 isLoading = true,
+                isStreaming = true,
+                streamingText = "",
                 errorMessage = null
             )
         }
 
-        viewModelScope.launch {
-            chatAgent.sendMessage(
+        streamingJob = viewModelScope.launch {
+            var fullText = StringBuilder()
+
+            chatAgent.sendMessageStreaming(
                 userMessage = userMessageText,
                 history = trimmedHistory,
                 config = config
-            ).fold(
-                onSuccess = { assistantMessage ->
-                    updateState {
-                        copy(
-                            messages = messages + assistantMessage,
-                            isLoading = false
-                        )
+            ).collect { event ->
+                when (event) {
+                    is StreamingEvent.TextDelta -> {
+                        fullText.append(event.text)
+                        updateState {
+                            copy(streamingText = fullText.toString())
+                        }
                     }
-                },
-                onFailure = { error ->
-                    updateState {
-                        copy(
-                            isLoading = false,
-                            errorMessage = error.message ?: "Unknown error occurred"
+                    is StreamingEvent.Complete -> {
+                        val assistantMessage = Message(
+                            id = assistantMessageId,
+                            role = Role.ASSISTANT,
+                            text = fullText.toString(),
+                            timestamp = currentTimeMillis(),
+                            usage = event.usage
                         )
+                        updateState {
+                            copy(
+                                messages = messages + assistantMessage,
+                                isLoading = false,
+                                isStreaming = false,
+                                streamingText = ""
+                            )
+                        }
+                        saveHistory()
+                    }
+                    is StreamingEvent.Error -> {
+                        updateState {
+                            copy(
+                                isLoading = false,
+                                isStreaming = false,
+                                streamingText = "",
+                                errorMessage = event.message
+                            )
+                        }
                     }
                 }
+            }
+        }
+    }
+
+    private fun stopGeneration() {
+        streamingJob?.cancel()
+        streamingJob = null
+
+        val currentState = _uiState.value
+        if (currentState.streamingText.isNotEmpty()) {
+            // Save partial response as a message
+            val partialMessage = Message(
+                id = generateId(),
+                role = Role.ASSISTANT,
+                text = currentState.streamingText + "\n\n[Generation stopped]",
+                timestamp = currentTimeMillis(),
+                usage = null
             )
+            updateState {
+                copy(
+                    messages = messages + partialMessage,
+                    isLoading = false,
+                    isStreaming = false,
+                    streamingText = ""
+                )
+            }
+            saveHistory()
+        } else {
+            updateState {
+                copy(
+                    isLoading = false,
+                    isStreaming = false,
+                    streamingText = ""
+                )
+            }
         }
     }
 
@@ -136,6 +222,13 @@ class ChatViewModel(
         }
 
         return trimmedMessages
+    }
+
+    private fun clearHistory() {
+        updateState { copy(messages = emptyList(), errorMessage = null) }
+        viewModelScope.launch {
+            historyStorage.clearHistory()
+        }
     }
 
     companion object {

@@ -8,6 +8,8 @@ data class ChatUiState(
     val messages: List<Message> = emptyList(),
     val inputText: String = "",
     val isLoading: Boolean = false,
+    val isStreaming: Boolean = false,
+    val streamingText: String = "",
     val errorMessage: String? = null,
     val systemPromptText: String = "",
     val selectedModel: ModelId = ModelId.SONNET,
@@ -27,7 +29,34 @@ data class ChatUiState(
     val isHistoryNearLimit: Boolean
         get() = estimatedHistoryTokens > historyTokenLimit * 0.8
 
+    // Session statistics
+    val sessionStats: SessionStats
+        get() {
+            val usages = messages.mapNotNull { it.usage }
+            return SessionStats(
+                totalInputTokens = usages.sumOf { it.inputTokens },
+                totalOutputTokens = usages.sumOf { it.outputTokens },
+                totalCostUsd = usages.sumOf { it.costUsd },
+                avgResponseTimeSec = if (usages.isNotEmpty()) {
+                    usages.map { it.responseTimeSec }.average()
+                } else 0.0,
+                messageCount = messages.size,
+                exchangeCount = usages.size
+            )
+        }
+
     companion object {
         const val DEFAULT_HISTORY_TOKEN_LIMIT = 1000
     }
+}
+
+data class SessionStats(
+    val totalInputTokens: Int,
+    val totalOutputTokens: Int,
+    val totalCostUsd: Double,
+    val avgResponseTimeSec: Double,
+    val messageCount: Int,
+    val exchangeCount: Int
+) {
+    val totalTokens: Int get() = totalInputTokens + totalOutputTokens
 }
