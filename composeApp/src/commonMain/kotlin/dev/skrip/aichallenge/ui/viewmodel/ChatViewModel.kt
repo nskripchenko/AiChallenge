@@ -3,7 +3,9 @@ package dev.skrip.aichallenge.ui.viewmodel
 import dev.skrip.aichallenge.data.source.StreamingEvent
 import dev.skrip.aichallenge.domain.model.AgentConfig
 import dev.skrip.aichallenge.domain.model.Message
+import dev.skrip.aichallenge.domain.model.ModelId
 import dev.skrip.aichallenge.domain.model.Role
+import dev.skrip.aichallenge.domain.model.TokenUsage
 import dev.skrip.aichallenge.domain.repository.ChatAgent
 import dev.skrip.aichallenge.domain.repository.ChatHistoryStorage
 import dev.skrip.aichallenge.logging.AgentLogger
@@ -81,7 +83,6 @@ class ChatViewModel(
         if (userMessageText.isBlank() || currentState.isLoading || currentState.isStreaming) return
 
         val config = buildAgentConfig(currentState)
-        val userMessage = createUserMessage(userMessageText)
         val assistantMessageId = generateId()
         val startTime = currentTimeMillis()
 
@@ -89,6 +90,19 @@ class ChatViewModel(
         val trimmedHistory = trimHistoryToTokenLimit(
             messages = currentState.messages,
             tokenLimit = config.historyTokenLimit
+        )
+
+        // Calculate estimated input tokens for this request
+        val estimatedInputTokens = calculateRequestTokens(
+            userMessage = userMessageText,
+            history = trimmedHistory,
+            systemPrompt = config.systemPrompt
+        )
+
+        val userMessage = createUserMessage(
+            text = userMessageText,
+            estimatedInputTokens = estimatedInputTokens,
+            model = config.model
         )
 
         updateState {
@@ -198,13 +212,38 @@ class ChatViewModel(
         )
     }
 
-    private fun createUserMessage(text: String): Message {
+    private fun createUserMessage(
+        text: String,
+        estimatedInputTokens: Int,
+        model: ModelId
+    ): Message {
         return Message(
             id = generateId(),
             role = Role.USER,
             text = text,
-            timestamp = currentTimeMillis()
+            timestamp = currentTimeMillis(),
+            usage = TokenUsage(
+                inputTokens = estimatedInputTokens,
+                outputTokens = 0,
+                responseTimeMs = 0,
+                model = model
+            )
         )
+    }
+
+    private fun calculateRequestTokens(
+        userMessage: String,
+        history: List<Message>,
+        systemPrompt: String?
+    ): Int {
+        var tokens = userMessage.estimateTokens()
+        tokens += history.sumOf { it.text.estimateTokens() }
+        if (!systemPrompt.isNullOrBlank()) {
+            tokens += systemPrompt.estimateTokens()
+        }
+        // Add overhead for message formatting (~4 tokens per message)
+        tokens += (history.size + 1) * 4
+        return tokens
     }
 
     private fun trimHistoryToTokenLimit(messages: List<Message>, tokenLimit: Int): List<Message> {

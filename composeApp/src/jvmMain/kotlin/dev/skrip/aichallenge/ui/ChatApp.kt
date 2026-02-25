@@ -16,6 +16,7 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.input.pointer.PointerIcon
 import androidx.compose.ui.input.pointer.pointerHoverIcon
 import androidx.compose.ui.input.pointer.pointerInput
@@ -31,15 +32,16 @@ fun ChatApp(viewModel: ChatViewModel) {
     val logs by viewModel.logs.collectAsState()
 
     var totalWidth by remember { mutableStateOf(0f) }
-    var logPanelWeight by remember { mutableStateOf(0.25f) }
-    var chatPanelWeight by remember { mutableStateOf(0.5f) }
+    var logPanelWeight by remember { mutableStateOf(0.22f) }
+    var chatPanelWeight by remember { mutableStateOf(0.53f) }
     val settingsPanelWeight = 1f - logPanelWeight - chatPanelWeight
 
     MaterialTheme {
         Surface(
             modifier = Modifier
                 .fillMaxSize()
-                .onSizeChanged { totalWidth = it.width.toFloat() }
+                .onSizeChanged { totalWidth = it.width.toFloat() },
+            color = Color.White
         ) {
             Row(modifier = Modifier.fillMaxSize()) {
                 LogPanel(
@@ -47,11 +49,11 @@ fun ChatApp(viewModel: ChatViewModel) {
                     modifier = Modifier.weight(logPanelWeight)
                 )
 
-                DraggableDivider(
+                Divider(
                     onDrag = { delta ->
                         val deltaWeight = delta / totalWidth
-                        val newLogWeight = (logPanelWeight + deltaWeight).coerceIn(0.1f, 0.5f)
-                        val newChatWeight = (chatPanelWeight - deltaWeight).coerceIn(0.2f, 0.7f)
+                        val newLogWeight = (logPanelWeight + deltaWeight).coerceIn(0.15f, 0.4f)
+                        val newChatWeight = (chatPanelWeight - deltaWeight).coerceIn(0.3f, 0.6f)
                         if (newLogWeight + newChatWeight + settingsPanelWeight <= 1f) {
                             logPanelWeight = newLogWeight
                             chatPanelWeight = newChatWeight
@@ -72,11 +74,11 @@ fun ChatApp(viewModel: ChatViewModel) {
                     modifier = Modifier.weight(chatPanelWeight)
                 )
 
-                DraggableDivider(
+                Divider(
                     onDrag = { delta ->
                         val deltaWeight = delta / totalWidth
-                        val newChatWeight = (chatPanelWeight + deltaWeight).coerceIn(0.2f, 0.7f)
-                        val newSettingsWeight = (settingsPanelWeight - deltaWeight).coerceIn(0.15f, 0.4f)
+                        val newChatWeight = (chatPanelWeight + deltaWeight).coerceIn(0.3f, 0.6f)
+                        val newSettingsWeight = (settingsPanelWeight - deltaWeight).coerceIn(0.2f, 0.35f)
                         if (logPanelWeight + newChatWeight + newSettingsWeight <= 1f) {
                             chatPanelWeight = newChatWeight
                         }
@@ -106,12 +108,12 @@ fun ChatApp(viewModel: ChatViewModel) {
 }
 
 @Composable
-private fun DraggableDivider(onDrag: (Float) -> Unit) {
+private fun Divider(onDrag: (Float) -> Unit) {
     Box(
         modifier = Modifier
-            .width(6.dp)
+            .width(1.dp)
             .fillMaxHeight()
-            .background(MaterialTheme.colorScheme.outline.copy(alpha = 0.3f))
+            .background(Color(0xFFE5E5E5))
             .pointerHoverIcon(PointerIcon(Cursor(Cursor.E_RESIZE_CURSOR)))
             .pointerInput(Unit) {
                 detectDragGestures { change, dragAmount ->
