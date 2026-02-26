@@ -1,9 +1,9 @@
 package dev.skrip.aichallenge.domain.repository
 
-import dev.skrip.aichallenge.domain.model.Message
+import dev.skrip.aichallenge.domain.model.ConversationState
 
 interface ChatHistoryStorage {
-    suspend fun saveHistory(messages: List<Message>)
-    suspend fun loadHistory(): List<Message>
+    suspend fun saveState(state: ConversationState)
+    suspend fun loadState(): ConversationState
     suspend fun clearHistory()
 }

@@ -1,12 +1,17 @@
 package dev.skrip.aichallenge.ui
 
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.core.LinearEasing
 import androidx.compose.animation.core.RepeatMode
 import androidx.compose.animation.core.animateFloat
 import androidx.compose.animation.core.infiniteRepeatable
 import androidx.compose.animation.core.rememberInfiniteTransition
 import androidx.compose.animation.core.tween
+import androidx.compose.animation.expandVertically
+import androidx.compose.animation.shrinkVertically
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -18,6 +23,7 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
@@ -33,10 +39,15 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import java.text.SimpleDateFormat
@@ -81,8 +92,12 @@ fun ChatPanel(
     inputText: String,
     isLoading: Boolean,
     isStreaming: Boolean,
+    isCompressing: Boolean,
     streamingText: String,
     errorMessage: String?,
+    hasSummary: Boolean,
+    summarizedCount: Int,
+    summary: String?,
     onInputChanged: (String) -> Unit,
     onSendClicked: () -> Unit,
     onStopClicked: () -> Unit,
@@ -120,8 +135,19 @@ fun ChatPanel(
                     modifier = Modifier.fillMaxWidth(),
                     verticalArrangement = Arrangement.spacedBy(24.dp)
                 ) {
-                    items(messages, key = { it.id }) { message ->
-                        MessageItem(message)
+                    messages.forEachIndexed { index, message ->
+                        // Show summary indicator right after summarized messages
+                        if (hasSummary && index == summarizedCount) {
+                            item(key = "summary_indicator") {
+                                SummaryIndicator(
+                                    count = summarizedCount,
+                                    summaryText = summary
+                                )
+                            }
+                        }
+                        item(key = message.id) {
+                            MessageItem(message)
+                        }
                     }
 
                     if (streamingText.isNotEmpty()) {
@@ -136,6 +162,15 @@ fun ChatPanel(
         // Typing indicator
         if (isLoading && !isStreaming) {
             TypingIndicator()
+        }
+
+        // Compression indicator
+        AnimatedVisibility(
+            visible = isCompressing,
+            enter = expandVertically(),
+            exit = shrinkVertically()
+        ) {
+            CompressionIndicator()
         }
 
         // Error
@@ -215,6 +250,11 @@ private fun StreamingMessage(text: String) {
         modifier = Modifier.fillMaxWidth(),
         horizontalAlignment = Alignment.Start
     ) {
+        val baseTextStyle = MaterialTheme.typography.bodyMedium.copy(
+            fontSize = 14.sp,
+            lineHeight = 22.sp,
+            color = ChatColors.textSecondary
+        )
         Markdown(
             content = text,
             colors = markdownColor(
@@ -224,13 +264,18 @@ private fun StreamingMessage(text: String) {
                 dividerColor = ChatColors.border
             ),
             typography = markdownTypography(
-                text = MaterialTheme.typography.bodyMedium.copy(
-                    fontSize = 14.sp,
-                    lineHeight = 22.sp
-                ),
-                code = MaterialTheme.typography.bodySmall.copy(
-                    fontSize = 13.sp
-                )
+                h1 = baseTextStyle.copy(fontSize = 16.sp, fontWeight = FontWeight.SemiBold),
+                h2 = baseTextStyle.copy(fontSize = 15.sp, fontWeight = FontWeight.SemiBold),
+                h3 = baseTextStyle.copy(fontSize = 14.sp, fontWeight = FontWeight.SemiBold),
+                h4 = baseTextStyle.copy(fontSize = 14.sp, fontWeight = FontWeight.Medium),
+                h5 = baseTextStyle.copy(fontSize = 14.sp, fontWeight = FontWeight.Medium),
+                h6 = baseTextStyle.copy(fontSize = 14.sp, fontWeight = FontWeight.Medium),
+                text = baseTextStyle,
+                paragraph = baseTextStyle,
+                ordered = baseTextStyle,
+                bullet = baseTextStyle,
+                list = baseTextStyle,
+                code = MaterialTheme.typography.bodySmall.copy(fontSize = 13.sp)
             ),
             components = markdownComponents(
                 codeBlock = highlightedCodeBlock,
@@ -277,6 +322,11 @@ private fun MessageItem(message: Message) {
         } else {
             // AI message - no bubble, just text
             Column(modifier = Modifier.widthIn(max = 560.dp)) {
+                val baseTextStyle = MaterialTheme.typography.bodyMedium.copy(
+                    fontSize = 14.sp,
+                    lineHeight = 22.sp,
+                    color = ChatColors.textSecondary
+                )
                 Markdown(
                     content = message.text,
                     colors = markdownColor(
@@ -286,13 +336,18 @@ private fun MessageItem(message: Message) {
                         dividerColor = ChatColors.border
                     ),
                     typography = markdownTypography(
-                        text = MaterialTheme.typography.bodyMedium.copy(
-                            fontSize = 14.sp,
-                            lineHeight = 22.sp
-                        ),
-                        code = MaterialTheme.typography.bodySmall.copy(
-                            fontSize = 13.sp
-                        )
+                        h1 = baseTextStyle.copy(fontSize = 16.sp, fontWeight = FontWeight.SemiBold),
+                        h2 = baseTextStyle.copy(fontSize = 15.sp, fontWeight = FontWeight.SemiBold),
+                        h3 = baseTextStyle.copy(fontSize = 14.sp, fontWeight = FontWeight.SemiBold),
+                        h4 = baseTextStyle.copy(fontSize = 14.sp, fontWeight = FontWeight.Medium),
+                        h5 = baseTextStyle.copy(fontSize = 14.sp, fontWeight = FontWeight.Medium),
+                        h6 = baseTextStyle.copy(fontSize = 14.sp, fontWeight = FontWeight.Medium),
+                        text = baseTextStyle,
+                        paragraph = baseTextStyle,
+                        ordered = baseTextStyle,
+                        bullet = baseTextStyle,
+                        list = baseTextStyle,
+                        code = MaterialTheme.typography.bodySmall.copy(fontSize = 13.sp)
                     ),
                     components = markdownComponents(
                         codeBlock = highlightedCodeBlock,
@@ -343,6 +398,152 @@ private fun formatCost(cost: Double): String {
 private fun formatTimestamp(timestamp: Long): String {
     val formatter = SimpleDateFormat("HH:mm", Locale.getDefault())
     return formatter.format(Date(timestamp))
+}
+
+@Composable
+private fun SummaryIndicator(count: Int, summaryText: String?) {
+    var isExpanded by remember { mutableStateOf(false) }
+
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(vertical = 8.dp)
+    ) {
+        // Header row with lines and clickable center
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Box(
+                modifier = Modifier
+                    .weight(1f)
+                    .height(1.dp)
+                    .background(ChatColors.border)
+            )
+
+            // Clickable summary badge
+            Row(
+                modifier = Modifier
+                    .clip(RoundedCornerShape(12.dp))
+                    .background(ChatColors.backgroundSecondary)
+                    .border(1.dp, ChatColors.border, RoundedCornerShape(12.dp))
+                    .clickable(enabled = summaryText != null) { isExpanded = !isExpanded }
+                    .padding(horizontal = 12.dp, vertical = 6.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(4.dp)
+            ) {
+                Text(
+                    text = "\uD83D\uDCDD",
+                    fontSize = 12.sp
+                )
+                Text(
+                    text = "$count messages → summary",
+                    fontSize = 11.sp,
+                    fontWeight = FontWeight.Medium,
+                    color = ChatColors.textTertiary
+                )
+                if (summaryText != null) {
+                    Text(
+                        text = if (isExpanded) "▲" else "▼",
+                        fontSize = 10.sp,
+                        color = ChatColors.textMuted
+                    )
+                }
+            }
+
+            Box(
+                modifier = Modifier
+                    .weight(1f)
+                    .height(1.dp)
+                    .background(ChatColors.border)
+            )
+        }
+
+        // Expandable summary content
+        AnimatedVisibility(
+            visible = isExpanded && summaryText != null,
+            enter = expandVertically(),
+            exit = shrinkVertically()
+        ) {
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(top = 12.dp)
+                    .background(ChatColors.backgroundSecondary, RoundedCornerShape(8.dp))
+                    .border(1.dp, ChatColors.border, RoundedCornerShape(8.dp))
+                    .padding(12.dp)
+            ) {
+                Column {
+                    Text(
+                        text = "Context Summary",
+                        fontSize = 11.sp,
+                        fontWeight = FontWeight.SemiBold,
+                        color = ChatColors.textTertiary,
+                        modifier = Modifier.padding(bottom = 8.dp)
+                    )
+                    Text(
+                        text = summaryText ?: "",
+                        fontSize = 13.sp,
+                        lineHeight = 20.sp,
+                        color = ChatColors.textSecondary
+                    )
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun CompressionIndicator() {
+    val infiniteTransition = rememberInfiniteTransition(label = "compression")
+    val progress by infiniteTransition.animateFloat(
+        initialValue = 0f,
+        targetValue = 1f,
+        animationSpec = infiniteRepeatable(
+            animation = tween(1500, easing = LinearEasing),
+            repeatMode = RepeatMode.Restart
+        ),
+        label = "progress"
+    )
+
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(vertical = 8.dp),
+        horizontalAlignment = Alignment.CenterHorizontally
+    ) {
+        Row(
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(8.dp)
+        ) {
+            Text(
+                text = "\uD83D\uDCDD",
+                fontSize = 12.sp
+            )
+            Text(
+                text = "Summarizing context...",
+                fontSize = 12.sp,
+                color = ChatColors.textTertiary
+            )
+        }
+
+        Spacer(modifier = Modifier.height(8.dp))
+
+        // Animated progress bar
+        Box(
+            modifier = Modifier
+                .width(200.dp)
+                .height(2.dp)
+                .background(ChatColors.border, RoundedCornerShape(1.dp))
+        ) {
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth(progress)
+                    .height(2.dp)
+                    .background(ChatColors.accent, RoundedCornerShape(1.dp))
+            )
+        }
+    }
 }
 
 @Composable

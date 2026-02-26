@@ -8,7 +8,8 @@ sealed class LogEntry {
         val model: String,
         val temperature: Double,
         val maxTokens: Int,
-        val requestJson: String
+        val requestJson: String,
+        val tag: String? = null
     ) : LogEntry()
 
     data class Response(

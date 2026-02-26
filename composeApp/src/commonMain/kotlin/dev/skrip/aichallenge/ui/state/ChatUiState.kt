@@ -9,13 +9,17 @@ data class ChatUiState(
     val inputText: String = "",
     val isLoading: Boolean = false,
     val isStreaming: Boolean = false,
+    val isCompressing: Boolean = false,
     val streamingText: String = "",
     val errorMessage: String? = null,
     val systemPromptText: String = "",
-    val selectedModel: ModelId = ModelId.SONNET,
+    val selectedModel: ModelId = ModelId.SONNET_4_6,
     val temperatureText: String = "0.7",
     val maxTokensText: String = "512",
-    val historyTokenLimitText: String = "1000"
+    val historyTokenLimitText: String = "1000",
+    val keepRecentMessagesText: String = "10",
+    val summary: String? = null,
+    val summarizedCount: Int = 0
 ) {
     val estimatedHistoryTokens: Int
         get() = messages.sumOf { it.text.estimateTokens() }
@@ -28,6 +32,12 @@ data class ChatUiState(
 
     val isHistoryNearLimit: Boolean
         get() = estimatedHistoryTokens > historyTokenLimit * 0.8
+
+    val keepRecentMessages: Int
+        get() = keepRecentMessagesText.toIntOrNull() ?: DEFAULT_KEEP_RECENT_MESSAGES
+
+    val hasSummary: Boolean
+        get() = summary != null && summarizedCount > 0
 
     // Session statistics
     val sessionStats: SessionStats
@@ -47,6 +57,7 @@ data class ChatUiState(
 
     companion object {
         const val DEFAULT_HISTORY_TOKEN_LIMIT = 1000
+        const val DEFAULT_KEEP_RECENT_MESSAGES = 10
     }
 }
 

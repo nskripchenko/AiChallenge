@@ -12,6 +12,8 @@ import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
@@ -61,14 +63,20 @@ fun AgentSettingsPanel(
     temperatureText: String,
     maxTokensText: String,
     historyTokenLimitText: String,
+    keepRecentMessagesText: String,
     estimatedHistoryTokens: Int,
     historyTokensRemaining: Int,
+    hasSummary: Boolean,
+    summarizedCount: Int,
+    totalMessages: Int,
+    keepRecentMessages: Int,
     sessionStats: SessionStats,
     onSystemPromptChanged: (String) -> Unit,
     onModelChanged: (ModelId) -> Unit,
     onTemperatureChanged: (String) -> Unit,
     onMaxTokensChanged: (String) -> Unit,
     onHistoryTokenLimitChanged: (String) -> Unit,
+    onKeepRecentMessagesChanged: (String) -> Unit,
     onClearHistory: () -> Unit,
     modifier: Modifier = Modifier
 ) {
@@ -95,7 +103,7 @@ fun AgentSettingsPanel(
             modifier = Modifier.padding(bottom = 24.dp)
         )
 
-        // History Token Card
+        // Context Card - Messages Overview
         Column(
             modifier = Modifier
                 .fillMaxWidth()
@@ -109,7 +117,7 @@ fun AgentSettingsPanel(
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 Text(
-                    text = "History",
+                    text = "Context",
                     fontSize = 13.sp,
                     fontWeight = FontWeight.Medium,
                     color = SettingsColors.textPrimary
@@ -127,7 +135,114 @@ fun AgentSettingsPanel(
 
             Spacer(modifier = Modifier.height(12.dp))
 
-            // Progress bar
+            // Context progress bar (summarized + recent)
+            val recentCount = (totalMessages - summarizedCount).coerceAtLeast(0)
+            val maxDisplayMessages = keepRecentMessages * 3 // Show capacity for ~3x keepRecent
+            val displayTotal = maxOf(totalMessages, maxDisplayMessages)
+
+            if (totalMessages > 0) {
+                // Segmented progress bar
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(8.dp)
+                        .clip(RoundedCornerShape(4.dp))
+                        .background(SettingsColors.border)
+                ) {
+                    // Summarized portion (darker)
+                    if (summarizedCount > 0) {
+                        Box(
+                            modifier = Modifier
+                                .weight(summarizedCount.toFloat() / displayTotal)
+                                .fillMaxHeight()
+                                .background(Color(0xFF737373))
+                        )
+                    }
+                    // Recent portion (accent)
+                    if (recentCount > 0) {
+                        Box(
+                            modifier = Modifier
+                                .weight(recentCount.toFloat() / displayTotal)
+                                .fillMaxHeight()
+                                .background(SettingsColors.accent)
+                        )
+                    }
+                    // Empty space
+                    val emptyWeight = (displayTotal - totalMessages).toFloat() / displayTotal
+                    if (emptyWeight > 0) {
+                        Spacer(modifier = Modifier.weight(emptyWeight))
+                    }
+                }
+
+                Spacer(modifier = Modifier.height(12.dp))
+
+                // Legend
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(16.dp)
+                ) {
+                    // Summarized legend
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(6.dp)
+                    ) {
+                        Box(
+                            modifier = Modifier
+                                .size(8.dp)
+                                .background(Color(0xFF737373), RoundedCornerShape(2.dp))
+                        )
+                        Text(
+                            text = "$summarizedCount summarized",
+                            fontSize = 11.sp,
+                            color = SettingsColors.textMuted
+                        )
+                    }
+                    // Recent legend
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(6.dp)
+                    ) {
+                        Box(
+                            modifier = Modifier
+                                .size(8.dp)
+                                .background(SettingsColors.accent, RoundedCornerShape(2.dp))
+                        )
+                        Text(
+                            text = "$recentCount recent",
+                            fontSize = 11.sp,
+                            color = SettingsColors.textMuted
+                        )
+                    }
+                }
+            } else {
+                Text(
+                    text = "No messages yet",
+                    fontSize = 12.sp,
+                    color = SettingsColors.textMuted
+                )
+            }
+        }
+
+        Spacer(modifier = Modifier.height(16.dp))
+
+        // Token Usage Card
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .background(SettingsColors.background, RoundedCornerShape(8.dp))
+                .border(1.dp, SettingsColors.border, RoundedCornerShape(8.dp))
+                .padding(16.dp)
+        ) {
+            Text(
+                text = "Tokens",
+                fontSize = 13.sp,
+                fontWeight = FontWeight.Medium,
+                color = SettingsColors.textPrimary
+            )
+
+            Spacer(modifier = Modifier.height(12.dp))
+
+            // Token progress bar
             Box(
                 modifier = Modifier
                     .fillMaxWidth()
@@ -143,7 +258,7 @@ fun AgentSettingsPanel(
                 )
             }
 
-            Spacer(modifier = Modifier.height(12.dp))
+            Spacer(modifier = Modifier.height(8.dp))
 
             Row(
                 modifier = Modifier.fillMaxWidth(),
@@ -151,12 +266,12 @@ fun AgentSettingsPanel(
             ) {
                 Text(
                     text = "$estimatedHistoryTokens used",
-                    fontSize = 12.sp,
+                    fontSize = 11.sp,
                     color = SettingsColors.textMuted
                 )
                 Text(
                     text = "$historyTokensRemaining remaining",
-                    fontSize = 12.sp,
+                    fontSize = 11.sp,
                     color = SettingsColors.textMuted
                 )
             }
@@ -191,16 +306,36 @@ fun AgentSettingsPanel(
         }
 
         // Settings Fields
-        SettingSection("History limit") {
-            OutlinedTextField(
-                value = historyTokenLimitText,
-                onValueChange = onHistoryTokenLimitChanged,
-                modifier = Modifier.fillMaxWidth(),
-                placeholder = { Text("1000", color = SettingsColors.textMuted, fontSize = 14.sp) },
-                singleLine = true,
-                colors = textFieldSettingsColors(),
-                shape = RoundedCornerShape(8.dp)
-            )
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(12.dp)
+        ) {
+            Column(modifier = Modifier.weight(1f)) {
+                SettingSection("History limit") {
+                    OutlinedTextField(
+                        value = historyTokenLimitText,
+                        onValueChange = onHistoryTokenLimitChanged,
+                        modifier = Modifier.fillMaxWidth(),
+                        placeholder = { Text("1000", color = SettingsColors.textMuted, fontSize = 14.sp) },
+                        singleLine = true,
+                        colors = textFieldSettingsColors(),
+                        shape = RoundedCornerShape(8.dp)
+                    )
+                }
+            }
+            Column(modifier = Modifier.weight(1f)) {
+                SettingSection("Keep recent") {
+                    OutlinedTextField(
+                        value = keepRecentMessagesText,
+                        onValueChange = onKeepRecentMessagesChanged,
+                        modifier = Modifier.fillMaxWidth(),
+                        placeholder = { Text("10", color = SettingsColors.textMuted, fontSize = 14.sp) },
+                        singleLine = true,
+                        colors = textFieldSettingsColors(),
+                        shape = RoundedCornerShape(8.dp)
+                    )
+                }
+            }
         }
 
         Spacer(modifier = Modifier.height(16.dp))

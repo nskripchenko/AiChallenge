@@ -2,12 +2,14 @@ package dev.skrip.aichallenge.ui.viewmodel
 
 import dev.skrip.aichallenge.data.source.StreamingEvent
 import dev.skrip.aichallenge.domain.model.AgentConfig
+import dev.skrip.aichallenge.domain.model.ConversationState
 import dev.skrip.aichallenge.domain.model.Message
 import dev.skrip.aichallenge.domain.model.ModelId
 import dev.skrip.aichallenge.domain.model.Role
 import dev.skrip.aichallenge.domain.model.TokenUsage
 import dev.skrip.aichallenge.domain.repository.ChatAgent
 import dev.skrip.aichallenge.domain.repository.ChatHistoryStorage
+import dev.skrip.aichallenge.domain.repository.ContextCompressor
 import dev.skrip.aichallenge.logging.AgentLogger
 import dev.skrip.aichallenge.logging.LogEntry
 import dev.skrip.aichallenge.ui.state.ChatUiState
@@ -28,7 +30,8 @@ import kotlinx.coroutines.launch
 class ChatViewModel(
     private val chatAgent: ChatAgent,
     agentLogger: AgentLogger,
-    private val historyStorage: ChatHistoryStorage
+    private val historyStorage: ChatHistoryStorage,
+    private val contextCompressor: ContextCompressor
 ) {
     private val viewModelScope = CoroutineScope(SupervisorJob() + Dispatchers.Main)
 
@@ -38,6 +41,7 @@ class ChatViewModel(
     val logs: StateFlow<List<LogEntry>> = agentLogger.logs
 
     private var streamingJob: Job? = null
+    private var conversationState = ConversationState()
 
     init {
         loadHistory()
@@ -45,16 +49,22 @@ class ChatViewModel(
 
     private fun loadHistory() {
         viewModelScope.launch {
-            val messages = historyStorage.loadHistory()
-            if (messages.isNotEmpty()) {
-                updateState { copy(messages = messages) }
+            conversationState = historyStorage.loadState()
+            if (conversationState.messages.isNotEmpty()) {
+                updateState {
+                    copy(
+                        messages = conversationState.messages,
+                        summary = conversationState.summary,
+                        summarizedCount = conversationState.summarizedCount
+                    )
+                }
             }
         }
     }
 
     private fun saveHistory() {
         viewModelScope.launch {
-            historyStorage.saveHistory(_uiState.value.messages)
+            historyStorage.saveState(conversationState)
         }
     }
 
@@ -66,6 +76,7 @@ class ChatViewModel(
             is ChatViewEvent.MaxTokensChanged -> updateState { copy(maxTokensText = event.text) }
             is ChatViewEvent.ModelChanged -> updateState { copy(selectedModel = event.model) }
             is ChatViewEvent.HistoryTokenLimitChanged -> updateState { copy(historyTokenLimitText = event.text) }
+            is ChatViewEvent.KeepRecentMessagesChanged -> updateState { copy(keepRecentMessagesText = event.text) }
             is ChatViewEvent.ClearHistory -> clearHistory()
             is ChatViewEvent.StopGeneration -> stopGeneration()
             is ChatViewEvent.SendClicked -> handleSendClicked()
@@ -84,11 +95,14 @@ class ChatViewModel(
 
         val config = buildAgentConfig(currentState)
         val assistantMessageId = generateId()
-        val startTime = currentTimeMillis()
+        val keepRecent = currentState.keepRecentMessages
 
-        // Trim history to fit token limit
+        // Build context messages using compressor (includes summary if available)
+        val contextMessages = contextCompressor.buildContextMessages(conversationState, keepRecent)
+
+        // Trim context to fit token limit
         val trimmedHistory = trimHistoryToTokenLimit(
-            messages = currentState.messages,
+            messages = contextMessages,
             tokenLimit = config.historyTokenLimit
         )
 
@@ -103,6 +117,11 @@ class ChatViewModel(
             text = userMessageText,
             estimatedInputTokens = estimatedInputTokens,
             model = config.model
+        )
+
+        // Update conversation state with user message
+        conversationState = conversationState.copy(
+            messages = conversationState.messages + userMessage
         )
 
         updateState {
@@ -139,12 +158,39 @@ class ChatViewModel(
                             timestamp = currentTimeMillis(),
                             usage = event.usage
                         )
+
+                        // Update conversation state with assistant message
+                        conversationState = conversationState.copy(
+                            messages = conversationState.messages + assistantMessage
+                        )
+
+                        // Update UI immediately so user sees the message
                         updateState {
                             copy(
-                                messages = messages + assistantMessage,
+                                messages = conversationState.messages,
                                 isLoading = false,
                                 isStreaming = false,
                                 streamingText = ""
+                            )
+                        }
+
+                        // Check if compression is needed and compress (may take time)
+                        val needsCompression = conversationState.needsCompression(keepRecent)
+                        if (needsCompression) {
+                            updateState { copy(isCompressing = true) }
+                        }
+
+                        conversationState = contextCompressor.compressIfNeeded(
+                            conversationState,
+                            keepRecent
+                        )
+
+                        // Update UI with compression results
+                        updateState {
+                            copy(
+                                summary = conversationState.summary,
+                                summarizedCount = conversationState.summarizedCount,
+                                isCompressing = false
                             )
                         }
                         saveHistory()
@@ -178,9 +224,12 @@ class ChatViewModel(
                 timestamp = currentTimeMillis(),
                 usage = null
             )
+            conversationState = conversationState.copy(
+                messages = conversationState.messages + partialMessage
+            )
             updateState {
                 copy(
-                    messages = messages + partialMessage,
+                    messages = conversationState.messages,
                     isLoading = false,
                     isStreaming = false,
                     streamingText = ""
@@ -264,7 +313,15 @@ class ChatViewModel(
     }
 
     private fun clearHistory() {
-        updateState { copy(messages = emptyList(), errorMessage = null) }
+        conversationState = ConversationState()
+        updateState {
+            copy(
+                messages = emptyList(),
+                summary = null,
+                summarizedCount = 0,
+                errorMessage = null
+            )
+        }
         viewModelScope.launch {
             historyStorage.clearHistory()
         }

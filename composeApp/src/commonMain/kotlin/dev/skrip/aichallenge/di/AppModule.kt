@@ -2,8 +2,10 @@ package dev.skrip.aichallenge.di
 
 import dev.skrip.aichallenge.data.remote.AnthropicRemoteDataSource
 import dev.skrip.aichallenge.data.repository.AnthropicChatAgent
+import dev.skrip.aichallenge.data.repository.HaikuContextCompressor
 import dev.skrip.aichallenge.data.source.LlmDataSource
 import dev.skrip.aichallenge.domain.repository.ChatAgent
+import dev.skrip.aichallenge.domain.repository.ContextCompressor
 import dev.skrip.aichallenge.logging.AgentLogger
 import dev.skrip.aichallenge.logging.InMemoryAgentLogger
 import dev.skrip.aichallenge.ui.viewmodel.ChatViewModel
@@ -35,10 +37,11 @@ val dataModule = module {
     single<AgentLogger> { InMemoryAgentLogger() }
     single<LlmDataSource> { AnthropicRemoteDataSource(get(), get()) }
     single<ChatAgent> { AnthropicChatAgent(get()) }
+    single<ContextCompressor> { HaikuContextCompressor(get()) }
 }
 
 val viewModelModule = module {
-    single { ChatViewModel(get(), get(), get()) }
+    single { ChatViewModel(get(), get(), get(), get()) }
 }
 
 val appModules = listOf(networkModule, dataModule, viewModelModule)

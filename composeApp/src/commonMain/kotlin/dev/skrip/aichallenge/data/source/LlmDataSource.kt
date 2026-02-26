@@ -15,13 +15,15 @@ interface LlmDataSource {
         messages: List<Message>,
         model: String,
         temperature: Double,
-        maxTokens: Int
+        maxTokens: Int,
+        tag: String? = null
     ): Result<Message>
 
     fun sendMessageStreaming(
         messages: List<Message>,
         model: String,
         temperature: Double,
-        maxTokens: Int
+        maxTokens: Int,
+        tag: String? = null
     ): Flow<StreamingEvent>
 }

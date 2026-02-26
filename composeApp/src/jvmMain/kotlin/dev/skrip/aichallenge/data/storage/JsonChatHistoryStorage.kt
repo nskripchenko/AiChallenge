@@ -1,5 +1,6 @@
 package dev.skrip.aichallenge.data.storage
 
+import dev.skrip.aichallenge.domain.model.ConversationState
 import dev.skrip.aichallenge.domain.model.Message
 import dev.skrip.aichallenge.domain.repository.ChatHistoryStorage
 import kotlinx.coroutines.Dispatchers
@@ -17,20 +18,27 @@ class JsonChatHistoryStorage(
         ignoreUnknownKeys = true
     }
 
-    override suspend fun saveHistory(messages: List<Message>) = withContext(Dispatchers.IO) {
+    override suspend fun saveState(state: ConversationState) = withContext(Dispatchers.IO) {
         val file = File(filePath)
         file.parentFile?.mkdirs()
-        file.writeText(json.encodeToString(messages))
+        file.writeText(json.encodeToString(state))
     }
 
-    override suspend fun loadHistory(): List<Message> = withContext(Dispatchers.IO) {
+    override suspend fun loadState(): ConversationState = withContext(Dispatchers.IO) {
         val file = File(filePath)
-        if (!file.exists()) return@withContext emptyList()
+        if (!file.exists()) return@withContext ConversationState()
 
         try {
-            json.decodeFromString<List<Message>>(file.readText())
+            // Try to load new format (ConversationState)
+            json.decodeFromString<ConversationState>(file.readText())
         } catch (e: Exception) {
-            emptyList()
+            // Fallback: try to load old format (List<Message>) for migration
+            try {
+                val messages = json.decodeFromString<List<Message>>(file.readText())
+                ConversationState(messages = messages)
+            } catch (e2: Exception) {
+                ConversationState()
+            }
         }
     }
 

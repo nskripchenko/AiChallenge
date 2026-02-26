@@ -164,11 +164,14 @@ private data class LogEntryStyle(
 )
 
 private fun LogEntry.toStyle(): LogEntryStyle = when (this) {
-    is LogEntry.Request -> LogEntryStyle(
-        label = "REQUEST",
-        summary = "$model · temp $temperature · max $maxTokens",
-        content = requestJson
-    )
+    is LogEntry.Request -> {
+        val labelText = if (tag != null) "📝 $tag" else "REQUEST"
+        LogEntryStyle(
+            label = labelText,
+            summary = "$model · temp $temperature · max $maxTokens",
+            content = requestJson
+        )
+    }
     is LogEntry.Response -> LogEntryStyle(
         label = "RESPONSE",
         summary = "Response received",

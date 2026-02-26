@@ -51,7 +51,8 @@ class AnthropicRemoteDataSource(
         messages: List<Message>,
         model: String,
         temperature: Double,
-        maxTokens: Int
+        maxTokens: Int,
+        tag: String?
     ): Result<Message> {
         return runCatching {
             val systemMessage = messages.find { it.role == Role.SYSTEM }
@@ -66,7 +67,7 @@ class AnthropicRemoteDataSource(
             )
 
             val requestJson = json.encodeToString(request)
-            logRequest(model, temperature, maxTokens, requestJson)
+            logRequest(model, temperature, maxTokens, requestJson, tag)
 
             val startTime = currentTimeMillis()
 
@@ -91,7 +92,7 @@ class AnthropicRemoteDataSource(
                     .mapNotNull { it.text }
                     .joinToString("")
 
-                val modelId = ModelId.fromApiId(model) ?: ModelId.SONNET
+                val modelId = ModelId.fromApiId(model) ?: ModelId.SONNET_4_6
 
                 Message(
                     id = generateId(),
@@ -125,7 +126,8 @@ class AnthropicRemoteDataSource(
         messages: List<Message>,
         model: String,
         temperature: Double,
-        maxTokens: Int
+        maxTokens: Int,
+        tag: String?
     ): Flow<StreamingEvent> = flow {
         val systemMessage = messages.find { it.role == Role.SYSTEM }
         val conversationMessages = messages.filter { it.role != Role.SYSTEM }
@@ -140,7 +142,7 @@ class AnthropicRemoteDataSource(
         )
 
         val requestJson = json.encodeToString(request)
-        logRequest(model, temperature, maxTokens, requestJson)
+        logRequest(model, temperature, maxTokens, requestJson, tag)
 
         val startTime = currentTimeMillis()
         var inputTokens = 0
@@ -208,7 +210,7 @@ class AnthropicRemoteDataSource(
                 }
 
                 val responseTimeMs = currentTimeMillis() - startTime
-                val modelId = ModelId.fromApiId(model) ?: ModelId.SONNET
+                val modelId = ModelId.fromApiId(model) ?: ModelId.SONNET_4_6
 
                 logResponse("{\"streaming\": true, \"input_tokens\": $inputTokens, \"output_tokens\": $outputTokens}")
 
@@ -227,13 +229,14 @@ class AnthropicRemoteDataSource(
         }
     }
 
-    private fun logRequest(model: String, temperature: Double, maxTokens: Int, requestJson: String) {
+    private fun logRequest(model: String, temperature: Double, maxTokens: Int, requestJson: String, tag: String? = null) {
         logger.log(LogEntry.Request(
             timestamp = currentTimeMillis(),
             model = model,
             temperature = temperature,
             maxTokens = maxTokens,
-            requestJson = requestJson
+            requestJson = requestJson,
+            tag = tag
         ))
     }
 

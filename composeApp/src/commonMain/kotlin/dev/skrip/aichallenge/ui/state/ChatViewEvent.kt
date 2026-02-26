@@ -12,4 +12,5 @@ sealed class ChatViewEvent {
     data class SystemPromptChanged(val text: String) : ChatViewEvent()
     data class ModelChanged(val model: ModelId) : ChatViewEvent()
     data class HistoryTokenLimitChanged(val text: String) : ChatViewEvent()
+    data class KeepRecentMessagesChanged(val text: String) : ChatViewEvent()
 }
