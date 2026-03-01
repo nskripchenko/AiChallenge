@@ -81,7 +81,7 @@ fun LogPanel(
             state = listState,
             modifier = Modifier.fillMaxWidth()
         ) {
-            items(logs, key = { it.timestamp }) { entry ->
+            items(logs, key = { it.id }) { entry ->
                 LogEntryCard(entry)
                 Spacer(modifier = Modifier.height(8.dp))
             }
@@ -117,7 +117,7 @@ private fun LogEntryCard(entry: LogEntry) {
                 color = LogColors.textMuted
             )
             Text(
-                text = formatTimestamp(entry.timestamp),
+                text = formatLogTimestamp(entry.timestamp),
                 fontSize = 12.sp,
                 color = LogColors.textMuted
             )
@@ -184,7 +184,7 @@ private fun LogEntry.toStyle(): LogEntryStyle = when (this) {
     )
 }
 
-private fun formatTimestamp(timestamp: Long): String {
+private fun formatLogTimestamp(timestamp: Long): String {
     val dateFormat = SimpleDateFormat("HH:mm:ss", Locale.getDefault())
     return dateFormat.format(Date(timestamp))
 }

@@ -26,7 +26,6 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -50,41 +49,11 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import java.text.SimpleDateFormat
-import java.util.Date
-import java.util.Locale
-import com.mikepenz.markdown.compose.Markdown
-import com.mikepenz.markdown.compose.components.markdownComponents
-import com.mikepenz.markdown.compose.elements.highlightedCodeBlock
-import com.mikepenz.markdown.compose.elements.highlightedCodeFence
-import com.mikepenz.markdown.m3.markdownColor
-import com.mikepenz.markdown.m3.markdownTypography
-import androidx.compose.material3.MaterialTheme
+import dev.skrip.aichallenge.domain.model.ContextStrategy
 import dev.skrip.aichallenge.domain.model.Message
 import dev.skrip.aichallenge.domain.model.Role
-import dev.skrip.aichallenge.domain.model.TokenUsage
+import dev.skrip.aichallenge.ui.state.Branch
 import dev.skrip.aichallenge.util.estimateTokens
-
-// Design System ChatColors
-private object ChatColors {
-    val background = Color.White
-    val backgroundSecondary = Color(0xFFFAFAFA)
-    val backgroundHover = Color(0xFFF5F5F5)
-
-    val textPrimary = Color(0xFF0A0A0A)
-    val textSecondary = Color(0xFF404040)
-    val textTertiary = Color(0xFF737373)
-    val textMuted = Color(0xFFA3A3A3)
-
-    val border = Color(0xFFE5E5E5)
-    val borderHover = Color(0xFFD4D4D4)
-
-    val accent = Color(0xFF18181B)
-    val accentHover = Color(0xFF27272A)
-    val onAccent = Color(0xFFFAFAFA)
-
-    val error = Color(0xFFDC2626)
-}
 
 @Composable
 fun ChatPanel(
@@ -98,6 +67,16 @@ fun ChatPanel(
     hasSummary: Boolean,
     summarizedCount: Int,
     summary: String?,
+    // Strategy-specific
+    currentStrategy: ContextStrategy,
+    windowSize: Int,
+    messagesOutsideWindow: List<Message>,
+    // Branching
+    branches: List<Branch>,
+    currentBranchId: String,
+    onCreateBranch: (name: String, fromMessageIndex: Int) -> Unit,
+    onSwitchBranch: (branchId: String) -> Unit,
+    onDeleteBranch: (branchId: String) -> Unit,
     onInputChanged: (String) -> Unit,
     onSendClicked: () -> Unit,
     onStopClicked: () -> Unit,
@@ -114,46 +93,79 @@ fun ChatPanel(
     Column(
         modifier = modifier
             .fillMaxHeight()
-            .background(ChatColors.background)
+            .background(AppTheme.background)
             .padding(24.dp)
     ) {
         // Header
-        Text(
-            text = "Chat",
-            fontSize = 18.sp,
-            fontWeight = FontWeight.SemiBold,
-            color = ChatColors.textPrimary,
-            letterSpacing = (-0.02).sp,
-            modifier = Modifier.padding(bottom = 24.dp)
-        )
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(bottom = 24.dp),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Text(
+                text = "Chat",
+                fontSize = 18.sp,
+                fontWeight = FontWeight.SemiBold,
+                color = AppTheme.textPrimary,
+                letterSpacing = (-0.02).sp
+            )
+
+            // Branch selector for BRANCHING strategy
+            if (currentStrategy == ContextStrategy.BRANCHING) {
+                BranchSelector(
+                    branches = branches,
+                    currentBranchId = currentBranchId,
+                    onSwitchBranch = onSwitchBranch,
+                    onDeleteBranch = onDeleteBranch
+                )
+            }
+        }
 
         // Messages
         Box(modifier = Modifier.weight(1f)) {
-            SelectionContainer {
-                LazyColumn(
-                    state = listState,
-                    modifier = Modifier.fillMaxWidth(),
-                    verticalArrangement = Arrangement.spacedBy(24.dp)
-                ) {
-                    messages.forEachIndexed { index, message ->
-                        // Show summary indicator right after summarized messages
-                        if (hasSummary && index == summarizedCount) {
-                            item(key = "summary_indicator") {
-                                SummaryIndicator(
-                                    count = summarizedCount,
-                                    summaryText = summary
-                                )
-                            }
-                        }
-                        item(key = message.id) {
-                            MessageItem(message)
-                        }
+            LazyColumn(
+                state = listState,
+                modifier = Modifier.fillMaxWidth(),
+                verticalArrangement = Arrangement.spacedBy(24.dp)
+            ) {
+                // Sliding Window: Show collapsible section for older messages
+                if (currentStrategy == ContextStrategy.SLIDING_WINDOW && messagesOutsideWindow.isNotEmpty()) {
+                    item(key = "older_messages_section") {
+                        OlderMessagesSection(
+                            messages = messagesOutsideWindow,
+                            windowSize = windowSize
+                        )
                     }
+                }
 
-                    if (streamingText.isNotEmpty()) {
-                        item(key = "streaming") {
-                            StreamingMessage(text = streamingText)
-                        }
+                // Summary indicator (only for SUMMARIZATION strategy)
+                if (currentStrategy == ContextStrategy.BRANCHING && hasSummary && summarizedCount > 0) {
+                    item(key = "summary_indicator") {
+                        SummaryIndicator(
+                            count = summarizedCount,
+                            summaryText = summary
+                        )
+                    }
+                }
+
+                // Messages
+                items(
+                    count = messages.size,
+                    key = { index -> messages[index].id }
+                ) { index ->
+                    MessageItem(
+                        message = messages[index],
+                        messageIndex = index,
+                        showForkButton = currentStrategy == ContextStrategy.BRANCHING,
+                        onFork = onCreateBranch
+                    )
+                }
+
+                if (streamingText.isNotEmpty()) {
+                    item(key = "streaming") {
+                        StreamingMessage(text = streamingText)
                     }
                 }
             }
@@ -177,7 +189,7 @@ fun ChatPanel(
         errorMessage?.let { error ->
             Text(
                 text = error,
-                color = ChatColors.error,
+                color = AppTheme.error,
                 fontSize = 13.sp,
                 modifier = Modifier.padding(vertical = 8.dp)
             )
@@ -198,16 +210,16 @@ fun ChatPanel(
                 placeholder = {
                     Text(
                         "Ask something...",
-                        color = ChatColors.textMuted,
+                        color = AppTheme.textMuted,
                         fontSize = 14.sp
                     )
                 },
                 maxLines = 4,
                 enabled = !isLoading && !isStreaming,
                 colors = OutlinedTextFieldDefaults.colors(
-                    focusedBorderColor = ChatColors.accent,
-                    unfocusedBorderColor = ChatColors.border,
-                    cursorColor = ChatColors.accent
+                    focusedBorderColor = AppTheme.accent,
+                    unfocusedBorderColor = AppTheme.border,
+                    cursorColor = AppTheme.accent
                 ),
                 shape = RoundedCornerShape(8.dp)
             )
@@ -216,10 +228,10 @@ fun ChatPanel(
                 onClick = if (isStreaming) onStopClicked else onSendClicked,
                 enabled = if (isStreaming) true else inputText.isNotBlank() && !isLoading,
                 colors = ButtonDefaults.buttonColors(
-                    containerColor = ChatColors.accent,
-                    contentColor = ChatColors.onAccent,
-                    disabledContainerColor = ChatColors.border,
-                    disabledContentColor = ChatColors.textMuted
+                    containerColor = AppTheme.accent,
+                    contentColor = AppTheme.onAccent,
+                    disabledContainerColor = AppTheme.border,
+                    disabledContentColor = AppTheme.textMuted
                 ),
                 shape = RoundedCornerShape(8.dp),
                 modifier = Modifier.height(52.dp)
@@ -237,7 +249,7 @@ fun ChatPanel(
             Text(
                 text = "~${inputText.estimateTokens()} tokens",
                 fontSize = 12.sp,
-                color = ChatColors.textMuted,
+                color = AppTheme.textMuted,
                 modifier = Modifier.padding(top = 8.dp, start = 4.dp)
             )
         }
@@ -250,154 +262,228 @@ private fun StreamingMessage(text: String) {
         modifier = Modifier.fillMaxWidth(),
         horizontalAlignment = Alignment.Start
     ) {
-        val baseTextStyle = MaterialTheme.typography.bodyMedium.copy(
-            fontSize = 14.sp,
-            lineHeight = 22.sp,
-            color = ChatColors.textSecondary
-        )
-        Markdown(
-            content = text,
-            colors = markdownColor(
-                text = ChatColors.textSecondary,
-                codeText = ChatColors.textPrimary,
-                codeBackground = ChatColors.backgroundSecondary,
-                dividerColor = ChatColors.border
-            ),
-            typography = markdownTypography(
-                h1 = baseTextStyle.copy(fontSize = 16.sp, fontWeight = FontWeight.SemiBold),
-                h2 = baseTextStyle.copy(fontSize = 15.sp, fontWeight = FontWeight.SemiBold),
-                h3 = baseTextStyle.copy(fontSize = 14.sp, fontWeight = FontWeight.SemiBold),
-                h4 = baseTextStyle.copy(fontSize = 14.sp, fontWeight = FontWeight.Medium),
-                h5 = baseTextStyle.copy(fontSize = 14.sp, fontWeight = FontWeight.Medium),
-                h6 = baseTextStyle.copy(fontSize = 14.sp, fontWeight = FontWeight.Medium),
-                text = baseTextStyle,
-                paragraph = baseTextStyle,
-                ordered = baseTextStyle,
-                bullet = baseTextStyle,
-                list = baseTextStyle,
-                code = MaterialTheme.typography.bodySmall.copy(fontSize = 13.sp)
-            ),
-            components = markdownComponents(
-                codeBlock = highlightedCodeBlock,
-                codeFence = highlightedCodeFence
-            )
-        )
-
+        MarkdownContent(content = text, modifier = Modifier.widthIn(max = 560.dp))
         Spacer(modifier = Modifier.height(8.dp))
         TypingIndicator()
     }
 }
 
 @Composable
-private fun MessageItem(message: Message) {
+private fun MessageItem(
+    message: Message,
+    messageIndex: Int = 0,
+    showForkButton: Boolean = false,
+    onFork: ((name: String, fromIndex: Int) -> Unit)? = null
+) {
+    var showForkDialog by remember { mutableStateOf(false) }
+    var branchName by remember { mutableStateOf("") }
     val isUser = message.role == Role.USER
 
     Column(
         modifier = Modifier.fillMaxWidth(),
         horizontalAlignment = if (isUser) Alignment.End else Alignment.Start
     ) {
-        if (isUser) {
-            // User message - subtle bubble
+        SelectionContainer {
+            if (isUser) {
+                UserMessageBubble(text = message.text)
+            } else {
+                MarkdownContent(content = message.text, modifier = Modifier.widthIn(max = 560.dp))
+            }
+        }
+
+        // Metadata with optional fork button
+        Row(
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(8.dp)
+        ) {
+            MessageMetadata(message = message)
+
+            if (showForkButton && onFork != null) {
+                ForkButton(onClick = { showForkDialog = true })
+            }
+        }
+
+        // Fork dialog
+        if (showForkDialog && onFork != null) {
+            ForkDialog(
+                messageIndex = messageIndex,
+                branchName = branchName,
+                onBranchNameChange = { branchName = it },
+                onConfirm = {
+                    onFork(branchName.ifBlank { "Ветка ${messageIndex + 1}" }, messageIndex)
+                    branchName = ""
+                    showForkDialog = false
+                },
+                onDismiss = {
+                    branchName = ""
+                    showForkDialog = false
+                }
+            )
+        }
+    }
+}
+
+@Composable
+private fun UserMessageBubble(text: String) {
+    Box(
+        modifier = Modifier
+            .widthIn(max = 480.dp)
+            .background(
+                color = AppTheme.backgroundSecondary,
+                shape = RoundedCornerShape(12.dp)
+            )
+            .border(
+                width = 1.dp,
+                color = AppTheme.border,
+                shape = RoundedCornerShape(12.dp)
+            )
+            .padding(12.dp, 10.dp)
+    ) {
+        Text(
+            text = text,
+            color = AppTheme.textSecondary,
+            fontSize = 14.sp,
+            lineHeight = 22.sp
+        )
+    }
+}
+
+@Composable
+private fun OlderMessagesSection(
+    messages: List<Message>,
+    windowSize: Int
+) {
+    var isExpanded by remember { mutableStateOf(false) }
+    val olderCount = messages.size
+
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(vertical = 8.dp)
+    ) {
+        // Header row with collapsible indicator
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
             Box(
                 modifier = Modifier
-                    .widthIn(max = 480.dp)
+                    .weight(1f)
+                    .height(1.dp)
+                    .background(AppTheme.border)
+            )
+
+            // Clickable badge showing older messages count
+            Row(
+                modifier = Modifier
+                    .clip(RoundedCornerShape(12.dp))
+                    .background(AppTheme.warningBackground)
+                    .border(1.dp, AppTheme.warningBorder, RoundedCornerShape(12.dp))
+                    .clickable { isExpanded = !isExpanded }
+                    .padding(horizontal = 12.dp, vertical = 6.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(6.dp)
+            ) {
+                Text(text = "🪟", fontSize = 12.sp)
+                Text(
+                    text = "$olderCount older messages (not sent to AI)",
+                    fontSize = 11.sp,
+                    fontWeight = FontWeight.Medium,
+                    color = AppTheme.warning
+                )
+                Text(
+                    text = if (isExpanded) "▲" else "▼",
+                    fontSize = 10.sp,
+                    color = AppTheme.warning
+                )
+            }
+
+            Box(
+                modifier = Modifier
+                    .weight(1f)
+                    .height(1.dp)
+                    .background(AppTheme.border)
+            )
+        }
+
+        // Expandable older messages
+        AnimatedVisibility(
+            visible = isExpanded,
+            enter = expandVertically(),
+            exit = shrinkVertically()
+        ) {
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(top = 16.dp)
+                    .background(AppTheme.backgroundSecondary, RoundedCornerShape(8.dp))
+                    .border(1.dp, AppTheme.border, RoundedCornerShape(8.dp))
+                    .padding(16.dp),
+                verticalArrangement = Arrangement.spacedBy(16.dp)
+            ) {
+                Text(
+                    text = "Messages outside window (last $windowSize kept)",
+                    fontSize = 11.sp,
+                    fontWeight = FontWeight.SemiBold,
+                    color = AppTheme.textTertiary
+                )
+
+                messages.forEach { message ->
+                    OlderMessageItem(message)
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun OlderMessageItem(message: Message) {
+    val isUser = message.role == Role.USER
+
+    Row(
+        modifier = Modifier.fillMaxWidth(),
+        horizontalArrangement = if (isUser) Arrangement.End else Arrangement.Start
+    ) {
+        Column(
+            horizontalAlignment = if (isUser) Alignment.End else Alignment.Start
+        ) {
+            Box(
+                modifier = Modifier
+                    .widthIn(max = 400.dp)
                     .background(
-                        color = ChatColors.backgroundSecondary,
-                        shape = RoundedCornerShape(12.dp)
+                        color = if (isUser) AppTheme.backgroundHover else AppTheme.background,
+                        shape = RoundedCornerShape(8.dp)
                     )
-                    .border(
-                        width = 1.dp,
-                        color = ChatColors.border,
-                        shape = RoundedCornerShape(12.dp)
-                    )
-                    .padding(12.dp, 10.dp)
+                    .border(1.dp, AppTheme.border, RoundedCornerShape(8.dp))
+                    .padding(10.dp, 8.dp)
             ) {
                 Text(
                     text = message.text,
-                    color = ChatColors.textSecondary,
-                    fontSize = 14.sp,
-                    lineHeight = 22.sp
-                )
-            }
-        } else {
-            // AI message - no bubble, just text
-            Column(modifier = Modifier.widthIn(max = 560.dp)) {
-                val baseTextStyle = MaterialTheme.typography.bodyMedium.copy(
-                    fontSize = 14.sp,
-                    lineHeight = 22.sp,
-                    color = ChatColors.textSecondary
-                )
-                Markdown(
-                    content = message.text,
-                    colors = markdownColor(
-                        text = ChatColors.textSecondary,
-                        codeText = ChatColors.textPrimary,
-                        codeBackground = ChatColors.backgroundSecondary,
-                        dividerColor = ChatColors.border
-                    ),
-                    typography = markdownTypography(
-                        h1 = baseTextStyle.copy(fontSize = 16.sp, fontWeight = FontWeight.SemiBold),
-                        h2 = baseTextStyle.copy(fontSize = 15.sp, fontWeight = FontWeight.SemiBold),
-                        h3 = baseTextStyle.copy(fontSize = 14.sp, fontWeight = FontWeight.SemiBold),
-                        h4 = baseTextStyle.copy(fontSize = 14.sp, fontWeight = FontWeight.Medium),
-                        h5 = baseTextStyle.copy(fontSize = 14.sp, fontWeight = FontWeight.Medium),
-                        h6 = baseTextStyle.copy(fontSize = 14.sp, fontWeight = FontWeight.Medium),
-                        text = baseTextStyle,
-                        paragraph = baseTextStyle,
-                        ordered = baseTextStyle,
-                        bullet = baseTextStyle,
-                        list = baseTextStyle,
-                        code = MaterialTheme.typography.bodySmall.copy(fontSize = 13.sp)
-                    ),
-                    components = markdownComponents(
-                        codeBlock = highlightedCodeBlock,
-                        codeFence = highlightedCodeFence
-                    )
-                )
-            }
-        }
-
-        // Metadata line
-        Row(
-            modifier = Modifier.padding(top = 6.dp),
-            horizontalArrangement = Arrangement.spacedBy(12.dp),
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            Text(
-                text = if (isUser) "You" else "Claude",
-                fontSize = 12.sp,
-                color = ChatColors.textMuted
-            )
-
-            Text(
-                text = formatTimestamp(message.timestamp),
-                fontSize = 12.sp,
-                color = ChatColors.textMuted
-            )
-
-            message.usage?.let { usage ->
-                Text(
-                    text = "${usage.responseTimeSec.format()}s · ${usage.totalTokens} tokens · ${formatCost(usage.costUsd)}",
                     fontSize = 12.sp,
-                    color = ChatColors.textMuted
+                    lineHeight = 18.sp,
+                    color = AppTheme.textTertiary,
+                    maxLines = 3,
+                    overflow = TextOverflow.Ellipsis
+                )
+            }
+
+            Row(
+                modifier = Modifier.padding(top = 4.dp),
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                Text(
+                    text = if (isUser) "You" else "Claude",
+                    fontSize = 10.sp,
+                    color = AppTheme.textMuted
+                )
+                Text(
+                    text = formatTimestamp(message.timestamp),
+                    fontSize = 10.sp,
+                    color = AppTheme.textMuted
                 )
             }
         }
     }
-}
-
-private fun Double.format(): String = "%.1f".format(this)
-
-private fun formatCost(cost: Double): String {
-    return when {
-        cost < 0.001 -> "<$0.001"
-        else -> "$${String.format("%.3f", cost)}"
-    }
-}
-
-private fun formatTimestamp(timestamp: Long): String {
-    val formatter = SimpleDateFormat("HH:mm", Locale.getDefault())
-    return formatter.format(Date(timestamp))
 }
 
 @Composable
@@ -418,15 +504,15 @@ private fun SummaryIndicator(count: Int, summaryText: String?) {
                 modifier = Modifier
                     .weight(1f)
                     .height(1.dp)
-                    .background(ChatColors.border)
+                    .background(AppTheme.border)
             )
 
             // Clickable summary badge
             Row(
                 modifier = Modifier
                     .clip(RoundedCornerShape(12.dp))
-                    .background(ChatColors.backgroundSecondary)
-                    .border(1.dp, ChatColors.border, RoundedCornerShape(12.dp))
+                    .background(AppTheme.backgroundSecondary)
+                    .border(1.dp, AppTheme.border, RoundedCornerShape(12.dp))
                     .clickable(enabled = summaryText != null) { isExpanded = !isExpanded }
                     .padding(horizontal = 12.dp, vertical = 6.dp),
                 verticalAlignment = Alignment.CenterVertically,
@@ -440,13 +526,13 @@ private fun SummaryIndicator(count: Int, summaryText: String?) {
                     text = "$count messages → summary",
                     fontSize = 11.sp,
                     fontWeight = FontWeight.Medium,
-                    color = ChatColors.textTertiary
+                    color = AppTheme.textTertiary
                 )
                 if (summaryText != null) {
                     Text(
                         text = if (isExpanded) "▲" else "▼",
                         fontSize = 10.sp,
-                        color = ChatColors.textMuted
+                        color = AppTheme.textMuted
                     )
                 }
             }
@@ -455,7 +541,7 @@ private fun SummaryIndicator(count: Int, summaryText: String?) {
                 modifier = Modifier
                     .weight(1f)
                     .height(1.dp)
-                    .background(ChatColors.border)
+                    .background(AppTheme.border)
             )
         }
 
@@ -469,8 +555,8 @@ private fun SummaryIndicator(count: Int, summaryText: String?) {
                 modifier = Modifier
                     .fillMaxWidth()
                     .padding(top = 12.dp)
-                    .background(ChatColors.backgroundSecondary, RoundedCornerShape(8.dp))
-                    .border(1.dp, ChatColors.border, RoundedCornerShape(8.dp))
+                    .background(AppTheme.backgroundSecondary, RoundedCornerShape(8.dp))
+                    .border(1.dp, AppTheme.border, RoundedCornerShape(8.dp))
                     .padding(12.dp)
             ) {
                 Column {
@@ -478,14 +564,14 @@ private fun SummaryIndicator(count: Int, summaryText: String?) {
                         text = "Context Summary",
                         fontSize = 11.sp,
                         fontWeight = FontWeight.SemiBold,
-                        color = ChatColors.textTertiary,
+                        color = AppTheme.textTertiary,
                         modifier = Modifier.padding(bottom = 8.dp)
                     )
                     Text(
                         text = summaryText ?: "",
                         fontSize = 13.sp,
                         lineHeight = 20.sp,
-                        color = ChatColors.textSecondary
+                        color = AppTheme.textSecondary
                     )
                 }
             }
@@ -523,7 +609,7 @@ private fun CompressionIndicator() {
             Text(
                 text = "Summarizing context...",
                 fontSize = 12.sp,
-                color = ChatColors.textTertiary
+                color = AppTheme.textTertiary
             )
         }
 
@@ -534,13 +620,13 @@ private fun CompressionIndicator() {
             modifier = Modifier
                 .width(200.dp)
                 .height(2.dp)
-                .background(ChatColors.border, RoundedCornerShape(1.dp))
+                .background(AppTheme.border, RoundedCornerShape(1.dp))
         ) {
             Box(
                 modifier = Modifier
                     .fillMaxWidth(progress)
                     .height(2.dp)
-                    .background(ChatColors.accent, RoundedCornerShape(1.dp))
+                    .background(AppTheme.accent, RoundedCornerShape(1.dp))
             )
         }
     }
@@ -571,10 +657,179 @@ private fun TypingIndicator() {
                     .size(6.dp)
                     .offset(y = offsetY.dp)
                     .background(
-                        color = ChatColors.textMuted,
+                        color = AppTheme.textMuted,
                         shape = CircleShape
                     )
             )
+        }
+    }
+}
+
+@Composable
+private fun ForkButton(onClick: () -> Unit) {
+    Row(
+        modifier = Modifier
+            .clip(RoundedCornerShape(4.dp))
+            .background(AppTheme.backgroundSecondary)
+            .border(1.dp, AppTheme.border, RoundedCornerShape(4.dp))
+            .clickable(onClick = onClick)
+            .padding(horizontal = 8.dp, vertical = 4.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(4.dp)
+    ) {
+        Text(text = "+", fontSize = 12.sp, color = AppTheme.textTertiary)
+        Text(text = "ветка", fontSize = 11.sp, color = AppTheme.textTertiary)
+    }
+}
+
+@Composable
+private fun ForkDialog(
+    messageIndex: Int,
+    branchName: String,
+    onBranchNameChange: (String) -> Unit,
+    onConfirm: () -> Unit,
+    onDismiss: () -> Unit
+) {
+    androidx.compose.material3.AlertDialog(
+        onDismissRequest = onDismiss,
+        title = {
+            Text("Создать ветку", fontSize = 16.sp, fontWeight = FontWeight.SemiBold)
+        },
+        text = {
+            Column {
+                Text(
+                    "Новая ветка диалога от сообщения #${messageIndex + 1}",
+                    fontSize = 13.sp,
+                    color = AppTheme.textTertiary,
+                    modifier = Modifier.padding(bottom = 12.dp)
+                )
+                OutlinedTextField(
+                    value = branchName,
+                    onValueChange = onBranchNameChange,
+                    label = { Text("Название ветки") },
+                    placeholder = { Text("Ветка ${messageIndex + 1}") },
+                    singleLine = true,
+                    modifier = Modifier.fillMaxWidth()
+                )
+            }
+        },
+        confirmButton = {
+            Button(onClick = onConfirm) {
+                Text("Создать")
+            }
+        },
+        dismissButton = {
+            androidx.compose.material3.TextButton(onClick = onDismiss) {
+                Text("Отмена")
+            }
+        }
+    )
+}
+
+@Composable
+private fun BranchSelector(
+    branches: List<Branch>,
+    currentBranchId: String,
+    onSwitchBranch: (String) -> Unit,
+    onDeleteBranch: (String) -> Unit
+) {
+    var expanded by remember { mutableStateOf(false) }
+    val currentBranch = branches.find { it.id == currentBranchId }
+    val displayName = currentBranch?.name ?: "main"
+
+    Box {
+        Row(
+            modifier = Modifier
+                .clip(RoundedCornerShape(8.dp))
+                .background(AppTheme.backgroundSecondary)
+                .border(1.dp, AppTheme.border, RoundedCornerShape(8.dp))
+                .clickable { expanded = true }
+                .padding(horizontal = 12.dp, vertical = 8.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(8.dp)
+        ) {
+            Text(text = "🌿", fontSize = 14.sp)
+            Text(
+                text = displayName,
+                fontSize = 13.sp,
+                fontWeight = FontWeight.Medium,
+                color = AppTheme.textPrimary
+            )
+            Text(
+                text = if (expanded) "▲" else "▼",
+                fontSize = 10.sp,
+                color = AppTheme.textMuted
+            )
+        }
+
+        androidx.compose.material3.DropdownMenu(
+            expanded = expanded,
+            onDismissRequest = { expanded = false }
+        ) {
+            // Main branch
+            androidx.compose.material3.DropdownMenuItem(
+                text = {
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        Text(
+                            text = "main",
+                            fontSize = 13.sp,
+                            fontWeight = if (currentBranchId == "main") FontWeight.SemiBold else FontWeight.Normal,
+                            color = AppTheme.textPrimary
+                        )
+                        if (currentBranchId == "main") {
+                            Text("✓", fontSize = 12.sp, color = AppTheme.accent)
+                        }
+                    }
+                },
+                onClick = {
+                    onSwitchBranch("main")
+                    expanded = false
+                }
+            )
+
+            // Other branches
+            branches.forEach { branch ->
+                androidx.compose.material3.DropdownMenuItem(
+                    text = {
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.SpaceBetween
+                        ) {
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(8.dp)
+                            ) {
+                                Text(
+                                    text = branch.name,
+                                    fontSize = 13.sp,
+                                    fontWeight = if (branch.id == currentBranchId) FontWeight.SemiBold else FontWeight.Normal,
+                                    color = AppTheme.textPrimary
+                                )
+                                if (branch.id == currentBranchId) {
+                                    Text("✓", fontSize = 12.sp, color = AppTheme.accent)
+                                }
+                            }
+                            // Delete button
+                            Text(
+                                text = "×",
+                                fontSize = 16.sp,
+                                color = AppTheme.textMuted,
+                                modifier = Modifier
+                                    .clickable { onDeleteBranch(branch.id) }
+                                    .padding(horizontal = 4.dp)
+                            )
+                        }
+                    },
+                    onClick = {
+                        onSwitchBranch(branch.id)
+                        expanded = false
+                    }
+                )
+            }
         }
     }
 }

@@ -38,22 +38,12 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import dev.skrip.aichallenge.domain.model.ContextStrategy
 import dev.skrip.aichallenge.domain.model.ModelId
+import dev.skrip.aichallenge.ui.state.Fact
 import dev.skrip.aichallenge.ui.state.SessionStats
 
-// Design System SettingsColors
-private object SettingsColors {
-    val background = Color.White
-    val backgroundSecondary = Color(0xFFFAFAFA)
-
-    val textPrimary = Color(0xFF0A0A0A)
-    val textSecondary = Color(0xFF404040)
-    val textTertiary = Color(0xFF737373)
-    val textMuted = Color(0xFFA3A3A3)
-
-    val border = Color(0xFFE5E5E5)
-    val accent = Color(0xFF18181B)
-}
+// Use unified AppTheme from DesignSystem.kt
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -64,6 +54,7 @@ fun AgentSettingsPanel(
     maxTokensText: String,
     historyTokenLimitText: String,
     keepRecentMessagesText: String,
+    windowSizeText: String,
     estimatedHistoryTokens: Int,
     historyTokensRemaining: Int,
     hasSummary: Boolean,
@@ -71,12 +62,18 @@ fun AgentSettingsPanel(
     totalMessages: Int,
     keepRecentMessages: Int,
     sessionStats: SessionStats,
+    // Strategy-specific
+    currentStrategy: ContextStrategy,
+    facts: List<Fact>,
+    isExtractingFacts: Boolean,
+    factsUpdatedCount: Int,
     onSystemPromptChanged: (String) -> Unit,
     onModelChanged: (ModelId) -> Unit,
     onTemperatureChanged: (String) -> Unit,
     onMaxTokensChanged: (String) -> Unit,
     onHistoryTokenLimitChanged: (String) -> Unit,
     onKeepRecentMessagesChanged: (String) -> Unit,
+    onWindowSizeChanged: (String) -> Unit,
     onClearHistory: () -> Unit,
     modifier: Modifier = Modifier
 ) {
@@ -89,7 +86,7 @@ fun AgentSettingsPanel(
     Column(
         modifier = modifier
             .fillMaxHeight()
-            .background(SettingsColors.backgroundSecondary)
+            .background(AppTheme.backgroundSecondary)
             .padding(24.dp)
             .verticalScroll(rememberScrollState())
     ) {
@@ -98,7 +95,7 @@ fun AgentSettingsPanel(
             text = "Settings",
             fontSize = 18.sp,
             fontWeight = FontWeight.SemiBold,
-            color = SettingsColors.textPrimary,
+            color = AppTheme.textPrimary,
             letterSpacing = (-0.02).sp,
             modifier = Modifier.padding(bottom = 24.dp)
         )
@@ -107,8 +104,8 @@ fun AgentSettingsPanel(
         Column(
             modifier = Modifier
                 .fillMaxWidth()
-                .background(SettingsColors.background, RoundedCornerShape(8.dp))
-                .border(1.dp, SettingsColors.border, RoundedCornerShape(8.dp))
+                .background(AppTheme.background, RoundedCornerShape(8.dp))
+                .border(1.dp, AppTheme.border, RoundedCornerShape(8.dp))
                 .padding(16.dp)
         ) {
             Row(
@@ -120,12 +117,12 @@ fun AgentSettingsPanel(
                     text = "Context",
                     fontSize = 13.sp,
                     fontWeight = FontWeight.Medium,
-                    color = SettingsColors.textPrimary
+                    color = AppTheme.textPrimary
                 )
                 Text(
                     text = "Clear",
                     fontSize = 13.sp,
-                    color = SettingsColors.textTertiary,
+                    color = AppTheme.textTertiary,
                     modifier = Modifier
                         .clip(RoundedCornerShape(4.dp))
                         .clickable(onClick = onClearHistory)
@@ -147,7 +144,7 @@ fun AgentSettingsPanel(
                         .fillMaxWidth()
                         .height(8.dp)
                         .clip(RoundedCornerShape(4.dp))
-                        .background(SettingsColors.border)
+                        .background(AppTheme.border)
                 ) {
                     // Summarized portion (darker)
                     if (summarizedCount > 0) {
@@ -164,7 +161,7 @@ fun AgentSettingsPanel(
                             modifier = Modifier
                                 .weight(recentCount.toFloat() / displayTotal)
                                 .fillMaxHeight()
-                                .background(SettingsColors.accent)
+                                .background(AppTheme.accent)
                         )
                     }
                     // Empty space
@@ -194,7 +191,7 @@ fun AgentSettingsPanel(
                         Text(
                             text = "$summarizedCount summarized",
                             fontSize = 11.sp,
-                            color = SettingsColors.textMuted
+                            color = AppTheme.textMuted
                         )
                     }
                     // Recent legend
@@ -205,12 +202,12 @@ fun AgentSettingsPanel(
                         Box(
                             modifier = Modifier
                                 .size(8.dp)
-                                .background(SettingsColors.accent, RoundedCornerShape(2.dp))
+                                .background(AppTheme.accent, RoundedCornerShape(2.dp))
                         )
                         Text(
                             text = "$recentCount recent",
                             fontSize = 11.sp,
-                            color = SettingsColors.textMuted
+                            color = AppTheme.textMuted
                         )
                     }
                 }
@@ -218,7 +215,7 @@ fun AgentSettingsPanel(
                 Text(
                     text = "No messages yet",
                     fontSize = 12.sp,
-                    color = SettingsColors.textMuted
+                    color = AppTheme.textMuted
                 )
             }
         }
@@ -229,15 +226,15 @@ fun AgentSettingsPanel(
         Column(
             modifier = Modifier
                 .fillMaxWidth()
-                .background(SettingsColors.background, RoundedCornerShape(8.dp))
-                .border(1.dp, SettingsColors.border, RoundedCornerShape(8.dp))
+                .background(AppTheme.background, RoundedCornerShape(8.dp))
+                .border(1.dp, AppTheme.border, RoundedCornerShape(8.dp))
                 .padding(16.dp)
         ) {
             Text(
                 text = "Tokens",
                 fontSize = 13.sp,
                 fontWeight = FontWeight.Medium,
-                color = SettingsColors.textPrimary
+                color = AppTheme.textPrimary
             )
 
             Spacer(modifier = Modifier.height(12.dp))
@@ -248,13 +245,13 @@ fun AgentSettingsPanel(
                     .fillMaxWidth()
                     .height(4.dp)
                     .clip(RoundedCornerShape(2.dp))
-                    .background(SettingsColors.border)
+                    .background(AppTheme.border)
             ) {
                 Box(
                     modifier = Modifier
                         .fillMaxWidth(usageRatio)
                         .height(4.dp)
-                        .background(SettingsColors.accent)
+                        .background(AppTheme.accent)
                 )
             }
 
@@ -267,12 +264,12 @@ fun AgentSettingsPanel(
                 Text(
                     text = "$estimatedHistoryTokens used",
                     fontSize = 11.sp,
-                    color = SettingsColors.textMuted
+                    color = AppTheme.textMuted
                 )
                 Text(
                     text = "$historyTokensRemaining remaining",
                     fontSize = 11.sp,
-                    color = SettingsColors.textMuted
+                    color = AppTheme.textMuted
                 )
             }
         }
@@ -284,15 +281,15 @@ fun AgentSettingsPanel(
             Column(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .background(SettingsColors.background, RoundedCornerShape(8.dp))
-                    .border(1.dp, SettingsColors.border, RoundedCornerShape(8.dp))
+                    .background(AppTheme.background, RoundedCornerShape(8.dp))
+                    .border(1.dp, AppTheme.border, RoundedCornerShape(8.dp))
                     .padding(16.dp)
             ) {
                 Text(
                     text = "Session",
                     fontSize = 13.sp,
                     fontWeight = FontWeight.Medium,
-                    color = SettingsColors.textPrimary,
+                    color = AppTheme.textPrimary,
                     modifier = Modifier.padding(bottom = 12.dp)
                 )
 
@@ -305,31 +302,38 @@ fun AgentSettingsPanel(
             Spacer(modifier = Modifier.height(16.dp))
         }
 
-        // Settings Fields
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.spacedBy(12.dp)
-        ) {
-            Column(modifier = Modifier.weight(1f)) {
-                SettingSection("History limit") {
+        // Facts Panel (only for STICKY_FACTS strategy)
+        if (currentStrategy == ContextStrategy.STICKY_FACTS) {
+            FactsPanel(
+                facts = facts,
+                isExtractingFacts = isExtractingFacts,
+                factsUpdatedCount = factsUpdatedCount
+            )
+            Spacer(modifier = Modifier.height(16.dp))
+        }
+
+        // Strategy-specific settings
+        when (currentStrategy) {
+            ContextStrategy.SLIDING_WINDOW -> {
+                SettingSection("Window size (messages)") {
                     OutlinedTextField(
-                        value = historyTokenLimitText,
-                        onValueChange = onHistoryTokenLimitChanged,
+                        value = windowSizeText,
+                        onValueChange = onWindowSizeChanged,
                         modifier = Modifier.fillMaxWidth(),
-                        placeholder = { Text("1000", color = SettingsColors.textMuted, fontSize = 14.sp) },
+                        placeholder = { Text("10", color = AppTheme.textMuted, fontSize = 14.sp) },
                         singleLine = true,
                         colors = textFieldSettingsColors(),
                         shape = RoundedCornerShape(8.dp)
                     )
                 }
             }
-            Column(modifier = Modifier.weight(1f)) {
-                SettingSection("Keep recent") {
+            ContextStrategy.STICKY_FACTS, ContextStrategy.BRANCHING -> {
+                SettingSection("Keep recent (messages)") {
                     OutlinedTextField(
                         value = keepRecentMessagesText,
                         onValueChange = onKeepRecentMessagesChanged,
                         modifier = Modifier.fillMaxWidth(),
-                        placeholder = { Text("10", color = SettingsColors.textMuted, fontSize = 14.sp) },
+                        placeholder = { Text("10", color = AppTheme.textMuted, fontSize = 14.sp) },
                         singleLine = true,
                         colors = textFieldSettingsColors(),
                         shape = RoundedCornerShape(8.dp)
@@ -347,7 +351,7 @@ fun AgentSettingsPanel(
                 modifier = Modifier
                     .fillMaxWidth()
                     .height(100.dp),
-                placeholder = { Text("Optional instructions...", color = SettingsColors.textMuted, fontSize = 14.sp) },
+                placeholder = { Text("Optional instructions...", color = AppTheme.textMuted, fontSize = 14.sp) },
                 maxLines = 5,
                 colors = textFieldSettingsColors(),
                 shape = RoundedCornerShape(8.dp)
@@ -382,7 +386,7 @@ fun AgentSettingsPanel(
                                 Text(
                                     model.label,
                                     fontSize = 14.sp,
-                                    color = SettingsColors.textSecondary
+                                    color = AppTheme.textSecondary
                                 )
                             },
                             onClick = {
@@ -407,7 +411,7 @@ fun AgentSettingsPanel(
                         value = temperatureText,
                         onValueChange = onTemperatureChanged,
                         modifier = Modifier.fillMaxWidth(),
-                        placeholder = { Text("0.7", color = SettingsColors.textMuted, fontSize = 14.sp) },
+                        placeholder = { Text("0.7", color = AppTheme.textMuted, fontSize = 14.sp) },
                         singleLine = true,
                         colors = textFieldSettingsColors(),
                         shape = RoundedCornerShape(8.dp)
@@ -420,7 +424,7 @@ fun AgentSettingsPanel(
                         value = maxTokensText,
                         onValueChange = onMaxTokensChanged,
                         modifier = Modifier.fillMaxWidth(),
-                        placeholder = { Text("512", color = SettingsColors.textMuted, fontSize = 14.sp) },
+                        placeholder = { Text("512", color = AppTheme.textMuted, fontSize = 14.sp) },
                         singleLine = true,
                         colors = textFieldSettingsColors(),
                         shape = RoundedCornerShape(8.dp)
@@ -428,6 +432,123 @@ fun AgentSettingsPanel(
                 }
             }
         }
+    }
+}
+
+@Composable
+private fun FactsPanel(
+    facts: List<Fact>,
+    isExtractingFacts: Boolean,
+    factsUpdatedCount: Int
+) {
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .background(AppTheme.background, RoundedCornerShape(8.dp))
+            .border(1.dp, AppTheme.border, RoundedCornerShape(8.dp))
+            .padding(16.dp)
+    ) {
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                Text(
+                    text = "Sticky Facts",
+                    fontSize = 13.sp,
+                    fontWeight = FontWeight.Medium,
+                    color = AppTheme.textPrimary
+                )
+                if (isExtractingFacts) {
+                    Text(
+                        text = "extracting...",
+                        fontSize = 11.sp,
+                        color = AppTheme.textMuted
+                    )
+                } else if (factsUpdatedCount > 0) {
+                    Box(
+                        modifier = Modifier
+                            .background(Color(0xFFDCFCE7), RoundedCornerShape(4.dp))
+                            .padding(horizontal = 6.dp, vertical = 2.dp)
+                    ) {
+                        Text(
+                            text = "updated",
+                            fontSize = 10.sp,
+                            fontWeight = FontWeight.Medium,
+                            color = Color(0xFF166534)
+                        )
+                    }
+                }
+            }
+            Text(
+                text = "${facts.size} facts",
+                fontSize = 11.sp,
+                color = AppTheme.textMuted
+            )
+        }
+
+        if (isExtractingFacts) {
+            Spacer(modifier = Modifier.height(12.dp))
+            LinearProgressIndicator(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(2.dp)
+                    .clip(RoundedCornerShape(1.dp)),
+                color = AppTheme.accent,
+                trackColor = AppTheme.border
+            )
+        }
+
+        if (facts.isNotEmpty()) {
+            Spacer(modifier = Modifier.height(12.dp))
+            Column(
+                verticalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                facts.forEach { fact ->
+                    FactItem(fact)
+                }
+            }
+        } else if (!isExtractingFacts) {
+            Spacer(modifier = Modifier.height(12.dp))
+            Text(
+                text = "Facts will be extracted automatically from conversation",
+                fontSize = 12.sp,
+                color = AppTheme.textMuted
+            )
+        }
+    }
+}
+
+@Composable
+private fun FactItem(fact: Fact) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .background(AppTheme.backgroundSecondary, RoundedCornerShape(6.dp))
+            .padding(10.dp),
+        horizontalArrangement = Arrangement.spacedBy(8.dp)
+    ) {
+        Text(
+            text = fact.key,
+            fontSize = 12.sp,
+            fontWeight = FontWeight.Medium,
+            color = AppTheme.textPrimary
+        )
+        Text(
+            text = ":",
+            fontSize = 12.sp,
+            color = AppTheme.textMuted
+        )
+        Text(
+            text = fact.value,
+            fontSize = 12.sp,
+            color = AppTheme.textSecondary,
+            modifier = Modifier.weight(1f)
+        )
     }
 }
 
@@ -441,7 +562,7 @@ private fun SettingSection(
             text = label,
             fontSize = 13.sp,
             fontWeight = FontWeight.Medium,
-            color = SettingsColors.textTertiary,
+            color = AppTheme.textTertiary,
             modifier = Modifier.padding(bottom = 8.dp)
         )
         content()
@@ -459,29 +580,22 @@ private fun StatRow(label: String, value: String) {
         Text(
             text = label,
             fontSize = 13.sp,
-            color = SettingsColors.textTertiary
+            color = AppTheme.textTertiary
         )
         Text(
             text = value,
             fontSize = 13.sp,
             fontWeight = FontWeight.Medium,
-            color = SettingsColors.textPrimary
+            color = AppTheme.textPrimary
         )
     }
 }
 
 @Composable
 private fun textFieldSettingsColors() = OutlinedTextFieldDefaults.colors(
-    focusedBorderColor = SettingsColors.accent,
-    unfocusedBorderColor = SettingsColors.border,
-    cursorColor = SettingsColors.accent,
-    focusedTextColor = SettingsColors.textSecondary,
-    unfocusedTextColor = SettingsColors.textSecondary
+    focusedBorderColor = AppTheme.accent,
+    unfocusedBorderColor = AppTheme.border,
+    cursorColor = AppTheme.accent,
+    focusedTextColor = AppTheme.textSecondary,
+    unfocusedTextColor = AppTheme.textSecondary
 )
-
-private fun formatCost(cost: Double): String {
-    return when {
-        cost < 0.001 -> "<$0.001"
-        else -> "$${String.format("%.3f", cost)}"
-    }
-}
