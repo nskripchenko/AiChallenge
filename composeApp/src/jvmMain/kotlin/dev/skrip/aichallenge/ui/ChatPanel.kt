@@ -7,6 +7,7 @@ import androidx.compose.animation.core.rememberInfiniteTransition
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -23,6 +24,8 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.text.KeyboardActions
+import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
@@ -34,12 +37,20 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.input.key.Key
+import androidx.compose.ui.input.key.key
+import androidx.compose.ui.input.key.onKeyEvent
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import dev.skrip.aichallenge.domain.model.Message
 import dev.skrip.aichallenge.domain.model.Role
 import dev.skrip.aichallenge.util.estimateTokens
+import java.awt.Toolkit
+import java.awt.datatransfer.StringSelection
 
 @Composable
 fun ChatPanel(
@@ -56,9 +67,11 @@ fun ChatPanel(
 ) {
     val listState = rememberLazyListState()
 
-    LaunchedEffect(messages.size, streamingText) {
-        if (messages.isNotEmpty() || streamingText.isNotEmpty()) {
-            listState.animateScrollToItem(maxOf(0, messages.size - 1 + if (streamingText.isNotEmpty()) 1 else 0))
+    // Auto-scroll to bottom on new messages or streaming
+    LaunchedEffect(messages.size, streamingText.length) {
+        val itemCount = messages.size + if (streamingText.isNotEmpty()) 1 else 0
+        if (itemCount > 0) {
+            listState.scrollToItem(itemCount - 1, scrollOffset = Int.MAX_VALUE)
         }
     }
 
@@ -70,31 +83,45 @@ fun ChatPanel(
     ) {
         // Header
         Text(
-            text = "Чат",
+            text = "Chat",
             fontSize = 18.sp,
             fontWeight = FontWeight.SemiBold,
             color = AppTheme.textPrimary,
             letterSpacing = (-0.02).sp,
-            modifier = Modifier.padding(bottom = 24.dp)
+            modifier = Modifier.padding(bottom = 20.dp)
         )
 
-        // Messages
+        // Messages list
         Box(modifier = Modifier.weight(1f)) {
-            LazyColumn(
-                state = listState,
-                modifier = Modifier.fillMaxWidth(),
-                verticalArrangement = Arrangement.spacedBy(24.dp)
-            ) {
-                items(
-                    count = messages.size,
-                    key = { index -> messages[index].id }
-                ) { index ->
-                    MessageItem(message = messages[index])
+            if (messages.isEmpty() && streamingText.isEmpty()) {
+                // Empty state
+                Box(
+                    modifier = Modifier.fillMaxWidth().fillMaxHeight(),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Text(
+                        text = "Start a conversation",
+                        fontSize = 14.sp,
+                        color = AppTheme.textMuted
+                    )
                 }
+            } else {
+                LazyColumn(
+                    state = listState,
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalArrangement = Arrangement.spacedBy(20.dp)
+                ) {
+                    items(
+                        count = messages.size,
+                        key = { index -> messages[index].id }
+                    ) { index ->
+                        MessageItem(message = messages[index])
+                    }
 
-                if (streamingText.isNotEmpty()) {
-                    item(key = "streaming") {
-                        StreamingMessage(text = streamingText)
+                    if (streamingText.isNotEmpty()) {
+                        item(key = "streaming") {
+                            StreamingMessage(text = streamingText)
+                        }
                     }
                 }
             }
@@ -105,14 +132,36 @@ fun ChatPanel(
             TypingIndicator()
         }
 
-        // Error
+        // Error message
         errorMessage?.let { error ->
-            Text(
-                text = error,
-                color = AppTheme.error,
-                fontSize = 13.sp,
-                modifier = Modifier.padding(vertical = 8.dp)
-            )
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(vertical = 8.dp)
+                    .background(Color(0xFFFEE2E2), RoundedCornerShape(8.dp))
+                    .padding(12.dp),
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Text(
+                    text = error,
+                    color = Color(0xFFDC2626),
+                    fontSize = 13.sp,
+                    modifier = Modifier.weight(1f)
+                )
+                Text(
+                    text = "Copy",
+                    fontSize = 11.sp,
+                    color = Color(0xFFDC2626),
+                    modifier = Modifier
+                        .clip(RoundedCornerShape(4.dp))
+                        .clickable {
+                            val clipboard = Toolkit.getDefaultToolkit().systemClipboard
+                            clipboard.setContents(StringSelection(error), null)
+                        }
+                        .padding(horizontal = 6.dp, vertical = 2.dp)
+                )
+            }
         }
 
         Spacer(modifier = Modifier.height(16.dp))
@@ -126,10 +175,19 @@ fun ChatPanel(
             OutlinedTextField(
                 value = inputText,
                 onValueChange = onInputChanged,
-                modifier = Modifier.weight(1f),
+                modifier = Modifier
+                    .weight(1f)
+                    .onKeyEvent { event ->
+                        if (event.key == Key.Enter && !isLoading && !isStreaming && inputText.isNotBlank()) {
+                            onSendClicked()
+                            true
+                        } else {
+                            false
+                        }
+                    },
                 placeholder = {
                     Text(
-                        "Напишите сообщение...",
+                        "Type a message...",
                         color = AppTheme.textMuted,
                         fontSize = 14.sp
                     )
@@ -139,25 +197,35 @@ fun ChatPanel(
                 colors = OutlinedTextFieldDefaults.colors(
                     focusedBorderColor = AppTheme.accent,
                     unfocusedBorderColor = AppTheme.border,
-                    cursorColor = AppTheme.accent
+                    cursorColor = AppTheme.accent,
+                    disabledBorderColor = AppTheme.border.copy(alpha = 0.5f),
+                    disabledTextColor = AppTheme.textMuted
                 ),
-                shape = RoundedCornerShape(8.dp)
+                shape = RoundedCornerShape(12.dp),
+                keyboardOptions = KeyboardOptions(imeAction = ImeAction.Send),
+                keyboardActions = KeyboardActions(
+                    onSend = {
+                        if (inputText.isNotBlank() && !isLoading && !isStreaming) {
+                            onSendClicked()
+                        }
+                    }
+                )
             )
 
             Button(
                 onClick = if (isStreaming) onStopClicked else onSendClicked,
                 enabled = if (isStreaming) true else inputText.isNotBlank() && !isLoading,
                 colors = ButtonDefaults.buttonColors(
-                    containerColor = AppTheme.accent,
-                    contentColor = AppTheme.onAccent,
+                    containerColor = if (isStreaming) Color(0xFFEF4444) else AppTheme.accent,
+                    contentColor = Color.White,
                     disabledContainerColor = AppTheme.border,
                     disabledContentColor = AppTheme.textMuted
                 ),
-                shape = RoundedCornerShape(8.dp),
+                shape = RoundedCornerShape(12.dp),
                 modifier = Modifier.height(52.dp)
             ) {
                 Text(
-                    text = if (isStreaming) "Стоп" else "Отправить",
+                    text = if (isStreaming) "Stop" else "Send",
                     fontSize = 14.sp,
                     fontWeight = FontWeight.Medium
                 )
@@ -167,10 +235,10 @@ fun ChatPanel(
         // Token estimate
         if (inputText.isNotBlank()) {
             Text(
-                text = "~${inputText.estimateTokens()} токенов",
-                fontSize = 12.sp,
+                text = "~${inputText.estimateTokens()} tokens",
+                fontSize = 11.sp,
                 color = AppTheme.textMuted,
-                modifier = Modifier.padding(top = 8.dp, start = 4.dp)
+                modifier = Modifier.padding(top = 6.dp, start = 4.dp)
             )
         }
     }
@@ -204,7 +272,27 @@ private fun MessageItem(message: Message) {
             }
         }
 
-        MessageMetadata(message = message)
+        Row(
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(12.dp)
+        ) {
+            MessageMetadata(message = message)
+
+            if (!isUser) {
+                Text(
+                    text = "Copy",
+                    fontSize = 11.sp,
+                    color = AppTheme.accent,
+                    modifier = Modifier
+                        .clip(RoundedCornerShape(4.dp))
+                        .clickable {
+                            val clipboard = Toolkit.getDefaultToolkit().systemClipboard
+                            clipboard.setContents(StringSelection(message.text), null)
+                        }
+                        .padding(horizontal = 6.dp, vertical = 2.dp)
+                )
+            }
+        }
     }
 }
 
@@ -214,19 +302,19 @@ private fun UserMessageBubble(text: String) {
         modifier = Modifier
             .widthIn(max = 480.dp)
             .background(
-                color = AppTheme.backgroundSecondary,
-                shape = RoundedCornerShape(12.dp)
+                color = AppTheme.accent.copy(alpha = 0.1f),
+                shape = RoundedCornerShape(16.dp, 16.dp, 4.dp, 16.dp)
             )
             .border(
                 width = 1.dp,
-                color = AppTheme.border,
-                shape = RoundedCornerShape(12.dp)
+                color = AppTheme.accent.copy(alpha = 0.2f),
+                shape = RoundedCornerShape(16.dp, 16.dp, 4.dp, 16.dp)
             )
-            .padding(12.dp, 10.dp)
+            .padding(14.dp, 10.dp)
     ) {
         Text(
             text = text,
-            color = AppTheme.textSecondary,
+            color = AppTheme.textPrimary,
             fontSize = 14.sp,
             lineHeight = 22.sp
         )

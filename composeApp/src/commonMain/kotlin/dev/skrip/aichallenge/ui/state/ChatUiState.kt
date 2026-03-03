@@ -1,6 +1,5 @@
 package dev.skrip.aichallenge.ui.state
 
-import dev.skrip.aichallenge.domain.model.MemoryLayer
 import dev.skrip.aichallenge.domain.model.MemoryState
 import dev.skrip.aichallenge.domain.model.Message
 import dev.skrip.aichallenge.domain.model.ModelId
@@ -18,14 +17,16 @@ data class ChatUiState(
     // Agent settings
     val systemPromptText: String = "",
     val selectedModel: ModelId = ModelId.SONNET_4_6,
-    val temperatureText: String = "0.7",
-    val maxTokensText: String = "512",
-    val historyTokenLimitText: String = "4000",
+    val temperatureText: String = "0.3",
+    val maxTokensText: String = "4096",
+    val historyTokenLimitText: String = "16000",
 
-    // Memory model (Day 11)
+    // Memory state
     val memoryState: MemoryState = MemoryState(),
-    val selectedMemoryLayer: MemoryLayer = MemoryLayer.WORKING,
-    val isMemoryPanelExpanded: Boolean = true
+
+    // Market data state
+    val isLoadingMarketData: Boolean = false,
+    val lastMarketDataUpdate: Long? = null
 ) {
     val estimatedHistoryTokens: Int
         get() = messages.sumOf { it.text.estimateTokens() }
@@ -36,7 +37,6 @@ data class ChatUiState(
     val historyTokensRemaining: Int
         get() = (historyTokenLimit - estimatedHistoryTokens).coerceAtLeast(0)
 
-    // Session statistics
     val sessionStats: SessionStats
         get() {
             val usages = messages.mapNotNull { it.usage }
@@ -53,7 +53,7 @@ data class ChatUiState(
         }
 
     companion object {
-        const val DEFAULT_HISTORY_TOKEN_LIMIT = 4000
+        const val DEFAULT_HISTORY_TOKEN_LIMIT = 16000
     }
 }
 

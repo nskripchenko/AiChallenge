@@ -1,6 +1,7 @@
 package dev.skrip.aichallenge.di
 
 import dev.skrip.aichallenge.data.remote.AnthropicRemoteDataSource
+import dev.skrip.aichallenge.data.remote.CoinGeckoService
 import dev.skrip.aichallenge.data.repository.AnthropicChatAgent
 import dev.skrip.aichallenge.data.repository.InMemoryMemoryManager
 import dev.skrip.aichallenge.data.source.LlmDataSource
@@ -10,6 +11,7 @@ import dev.skrip.aichallenge.logging.AgentLogger
 import dev.skrip.aichallenge.logging.InMemoryAgentLogger
 import dev.skrip.aichallenge.ui.viewmodel.ChatViewModel
 import io.ktor.client.HttpClient
+import io.ktor.client.plugins.HttpTimeout
 import io.ktor.client.plugins.contentnegotiation.ContentNegotiation
 import io.ktor.client.plugins.logging.LogLevel
 import io.ktor.client.plugins.logging.Logging
@@ -29,6 +31,11 @@ val networkModule = module {
             install(Logging) {
                 level = LogLevel.NONE
             }
+            install(HttpTimeout) {
+                requestTimeoutMillis = 120_000  // 2 minutes
+                connectTimeoutMillis = 30_000   // 30 seconds
+                socketTimeoutMillis = 120_000   // 2 minutes
+            }
         }
     }
 }
@@ -38,10 +45,11 @@ val dataModule = module {
     single<LlmDataSource> { AnthropicRemoteDataSource(get(), get()) }
     single<ChatAgent> { AnthropicChatAgent(get()) }
     single<MemoryManager> { InMemoryMemoryManager(getOrNull()) }
+    single { CoinGeckoService(get()) }
 }
 
 val viewModelModule = module {
-    single { ChatViewModel(get(), get(), get(), get()) }
+    single { ChatViewModel(get(), get(), get(), get(), get()) }
 }
 
 val appModules = listOf(networkModule, dataModule, viewModelModule)

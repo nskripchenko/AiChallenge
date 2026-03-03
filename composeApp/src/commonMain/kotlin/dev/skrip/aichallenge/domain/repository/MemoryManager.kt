@@ -29,6 +29,6 @@ interface MemoryManager {
     suspend fun removeKnowledge(knowledgeId: String)
     suspend fun clearLongTermMemory()
 
-    // Build context string from all memory layers
-    fun buildMemoryContext(): String
+    // Clear everything
+    suspend fun clearAllMemory()
 }

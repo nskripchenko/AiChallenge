@@ -140,67 +140,8 @@ class InMemoryMemoryManager(
         storage?.saveLongTermMemory(newLongTerm)
     }
 
-    override fun buildMemoryContext(): String {
-        val memory = _memoryState.value
-        val sections = mutableListOf<String>()
-
-        // Long-term memory (profile and knowledge)
-        val profile = memory.longTerm.profile
-        if (profile.name.isNotBlank() || profile.context.isNotBlank() || profile.preferences.isNotEmpty()) {
-            val profileSection = buildString {
-                appendLine("=== ПРОФИЛЬ ПОЛЬЗОВАТЕЛЯ ===")
-                if (profile.name.isNotBlank()) appendLine("Имя: ${profile.name}")
-                if (profile.context.isNotBlank()) appendLine("Контекст: ${profile.context}")
-                if (profile.preferences.isNotEmpty()) {
-                    appendLine("Предпочтения:")
-                    profile.preferences.forEach { (key, value) ->
-                        appendLine("  - $key: $value")
-                    }
-                }
-            }
-            sections.add(profileSection)
-        }
-
-        // Decisions
-        if (memory.longTerm.decisions.isNotEmpty()) {
-            val decisionsSection = buildString {
-                appendLine("=== ВАЖНЫЕ РЕШЕНИЯ ===")
-                memory.longTerm.decisions.forEach { decision ->
-                    appendLine("• ${decision.title}: ${decision.description}")
-                }
-            }
-            sections.add(decisionsSection)
-        }
-
-        // Knowledge
-        if (memory.longTerm.knowledge.isNotEmpty()) {
-            val knowledgeSection = buildString {
-                appendLine("=== БАЗА ЗНАНИЙ ===")
-                memory.longTerm.knowledge.groupBy { it.category }.forEach { (category, items) ->
-                    appendLine("[$category]")
-                    items.forEach { item ->
-                        appendLine("• ${item.title}: ${item.content}")
-                    }
-                }
-            }
-            sections.add(knowledgeSection)
-        }
-
-        // Working memory (current task)
-        if (memory.working.items.isNotEmpty()) {
-            val workingSection = buildString {
-                appendLine("=== РАБОЧАЯ ПАМЯТЬ (текущая задача) ===")
-                memory.working.items.forEach { item ->
-                    appendLine("• ${item.label}: ${item.content}")
-                }
-            }
-            sections.add(workingSection)
-        }
-
-        return if (sections.isEmpty()) {
-            ""
-        } else {
-            sections.joinToString("\n\n")
-        }
+    override suspend fun clearAllMemory() {
+        _memoryState.value = MemoryState()
+        storage?.clearAll()
     }
 }

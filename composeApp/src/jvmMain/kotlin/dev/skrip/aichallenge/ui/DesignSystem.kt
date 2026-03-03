@@ -4,7 +4,9 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedTextFieldDefaults
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextFieldColors
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -148,3 +150,15 @@ fun formatTimestamp(timestamp: Long): String {
     val formatter = SimpleDateFormat("HH:mm", Locale.getDefault())
     return formatter.format(Date(timestamp))
 }
+
+/**
+ * Common text field colors for OutlinedTextField
+ */
+@Composable
+fun textFieldColors(): TextFieldColors = OutlinedTextFieldDefaults.colors(
+    focusedBorderColor = AppTheme.accent,
+    unfocusedBorderColor = AppTheme.border,
+    cursorColor = AppTheme.accent,
+    focusedTextColor = AppTheme.textSecondary,
+    unfocusedTextColor = AppTheme.textSecondary
+)
