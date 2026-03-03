@@ -12,7 +12,6 @@ import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -22,7 +21,6 @@ import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.ExposedDropdownMenuAnchorType
 import androidx.compose.material3.ExposedDropdownMenuBox
 import androidx.compose.material3.ExposedDropdownMenuDefaults
-import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.OutlinedTextFieldDefaults
 import androidx.compose.material3.Text
@@ -38,12 +36,11 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import dev.skrip.aichallenge.domain.model.ContextStrategy
+import dev.skrip.aichallenge.domain.model.MemoryLayer
+import dev.skrip.aichallenge.domain.model.MemoryState
 import dev.skrip.aichallenge.domain.model.ModelId
-import dev.skrip.aichallenge.ui.state.Fact
+import dev.skrip.aichallenge.domain.model.UserProfile
 import dev.skrip.aichallenge.ui.state.SessionStats
-
-// Use unified AppTheme from DesignSystem.kt
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -53,32 +50,37 @@ fun AgentSettingsPanel(
     temperatureText: String,
     maxTokensText: String,
     historyTokenLimitText: String,
-    keepRecentMessagesText: String,
-    windowSizeText: String,
     estimatedHistoryTokens: Int,
     historyTokensRemaining: Int,
-    hasSummary: Boolean,
-    summarizedCount: Int,
     totalMessages: Int,
-    keepRecentMessages: Int,
     sessionStats: SessionStats,
-    // Strategy-specific
-    currentStrategy: ContextStrategy,
-    facts: List<Fact>,
-    isExtractingFacts: Boolean,
-    factsUpdatedCount: Int,
+    // Memory model
+    memoryState: MemoryState,
+    selectedMemoryLayer: MemoryLayer,
+    isMemoryPanelExpanded: Boolean,
+    onSelectMemoryLayer: (MemoryLayer) -> Unit,
+    onToggleMemoryPanel: () -> Unit,
+    onAddToWorkingMemory: (String, String) -> Unit,
+    onRemoveFromWorkingMemory: (String) -> Unit,
+    onClearWorkingMemory: () -> Unit,
+    onUpdateProfile: (UserProfile) -> Unit,
+    onAddDecision: (String, String) -> Unit,
+    onRemoveDecision: (String) -> Unit,
+    onAddKnowledge: (String, String, String) -> Unit,
+    onRemoveKnowledge: (String) -> Unit,
+    onClearLongTermMemory: () -> Unit,
+    onSetShortTermLimit: (Int) -> Unit,
+    // Original callbacks
     onSystemPromptChanged: (String) -> Unit,
     onModelChanged: (ModelId) -> Unit,
     onTemperatureChanged: (String) -> Unit,
     onMaxTokensChanged: (String) -> Unit,
     onHistoryTokenLimitChanged: (String) -> Unit,
-    onKeepRecentMessagesChanged: (String) -> Unit,
-    onWindowSizeChanged: (String) -> Unit,
     onClearHistory: () -> Unit,
     modifier: Modifier = Modifier
 ) {
     var expanded by remember { mutableStateOf(false) }
-    val historyTokenLimit = historyTokenLimitText.toIntOrNull() ?: 1000
+    val historyTokenLimit = historyTokenLimitText.toIntOrNull() ?: 4000
     val usageRatio = if (historyTokenLimit > 0) {
         (estimatedHistoryTokens.toFloat() / historyTokenLimit).coerceIn(0f, 1f)
     } else 0f
@@ -92,7 +94,7 @@ fun AgentSettingsPanel(
     ) {
         // Header
         Text(
-            text = "Settings",
+            text = "Настройки",
             fontSize = 18.sp,
             fontWeight = FontWeight.SemiBold,
             color = AppTheme.textPrimary,
@@ -100,7 +102,28 @@ fun AgentSettingsPanel(
             modifier = Modifier.padding(bottom = 24.dp)
         )
 
-        // Context Card - Messages Overview
+        // Memory Panel - Main Feature
+        MemoryPanel(
+            memoryState = memoryState,
+            selectedLayer = selectedMemoryLayer,
+            isExpanded = isMemoryPanelExpanded,
+            onSelectLayer = onSelectMemoryLayer,
+            onToggleExpanded = onToggleMemoryPanel,
+            onAddToWorkingMemory = onAddToWorkingMemory,
+            onRemoveFromWorkingMemory = onRemoveFromWorkingMemory,
+            onClearWorkingMemory = onClearWorkingMemory,
+            onUpdateProfile = onUpdateProfile,
+            onAddDecision = onAddDecision,
+            onRemoveDecision = onRemoveDecision,
+            onAddKnowledge = onAddKnowledge,
+            onRemoveKnowledge = onRemoveKnowledge,
+            onClearLongTermMemory = onClearLongTermMemory,
+            onSetShortTermLimit = onSetShortTermLimit
+        )
+
+        Spacer(modifier = Modifier.height(16.dp))
+
+        // Context Card
         Column(
             modifier = Modifier
                 .fillMaxWidth()
@@ -114,13 +137,13 @@ fun AgentSettingsPanel(
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 Text(
-                    text = "Context",
+                    text = "Контекст",
                     fontSize = 13.sp,
                     fontWeight = FontWeight.Medium,
                     color = AppTheme.textPrimary
                 )
                 Text(
-                    text = "Clear",
+                    text = "Очистить",
                     fontSize = 13.sp,
                     color = AppTheme.textTertiary,
                     modifier = Modifier
@@ -129,113 +152,6 @@ fun AgentSettingsPanel(
                         .padding(horizontal = 8.dp, vertical = 4.dp)
                 )
             }
-
-            Spacer(modifier = Modifier.height(12.dp))
-
-            // Context progress bar (summarized + recent)
-            val recentCount = (totalMessages - summarizedCount).coerceAtLeast(0)
-            val maxDisplayMessages = keepRecentMessages * 3 // Show capacity for ~3x keepRecent
-            val displayTotal = maxOf(totalMessages, maxDisplayMessages)
-
-            if (totalMessages > 0) {
-                // Segmented progress bar
-                Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .height(8.dp)
-                        .clip(RoundedCornerShape(4.dp))
-                        .background(AppTheme.border)
-                ) {
-                    // Summarized portion (darker)
-                    if (summarizedCount > 0) {
-                        Box(
-                            modifier = Modifier
-                                .weight(summarizedCount.toFloat() / displayTotal)
-                                .fillMaxHeight()
-                                .background(Color(0xFF737373))
-                        )
-                    }
-                    // Recent portion (accent)
-                    if (recentCount > 0) {
-                        Box(
-                            modifier = Modifier
-                                .weight(recentCount.toFloat() / displayTotal)
-                                .fillMaxHeight()
-                                .background(AppTheme.accent)
-                        )
-                    }
-                    // Empty space
-                    val emptyWeight = (displayTotal - totalMessages).toFloat() / displayTotal
-                    if (emptyWeight > 0) {
-                        Spacer(modifier = Modifier.weight(emptyWeight))
-                    }
-                }
-
-                Spacer(modifier = Modifier.height(12.dp))
-
-                // Legend
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.spacedBy(16.dp)
-                ) {
-                    // Summarized legend
-                    Row(
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(6.dp)
-                    ) {
-                        Box(
-                            modifier = Modifier
-                                .size(8.dp)
-                                .background(Color(0xFF737373), RoundedCornerShape(2.dp))
-                        )
-                        Text(
-                            text = "$summarizedCount summarized",
-                            fontSize = 11.sp,
-                            color = AppTheme.textMuted
-                        )
-                    }
-                    // Recent legend
-                    Row(
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(6.dp)
-                    ) {
-                        Box(
-                            modifier = Modifier
-                                .size(8.dp)
-                                .background(AppTheme.accent, RoundedCornerShape(2.dp))
-                        )
-                        Text(
-                            text = "$recentCount recent",
-                            fontSize = 11.sp,
-                            color = AppTheme.textMuted
-                        )
-                    }
-                }
-            } else {
-                Text(
-                    text = "No messages yet",
-                    fontSize = 12.sp,
-                    color = AppTheme.textMuted
-                )
-            }
-        }
-
-        Spacer(modifier = Modifier.height(16.dp))
-
-        // Token Usage Card
-        Column(
-            modifier = Modifier
-                .fillMaxWidth()
-                .background(AppTheme.background, RoundedCornerShape(8.dp))
-                .border(1.dp, AppTheme.border, RoundedCornerShape(8.dp))
-                .padding(16.dp)
-        ) {
-            Text(
-                text = "Tokens",
-                fontSize = 13.sp,
-                fontWeight = FontWeight.Medium,
-                color = AppTheme.textPrimary
-            )
 
             Spacer(modifier = Modifier.height(12.dp))
 
@@ -262,12 +178,12 @@ fun AgentSettingsPanel(
                 horizontalArrangement = Arrangement.SpaceBetween
             ) {
                 Text(
-                    text = "$estimatedHistoryTokens used",
+                    text = "$totalMessages сообщений",
                     fontSize = 11.sp,
                     color = AppTheme.textMuted
                 )
                 Text(
-                    text = "$historyTokensRemaining remaining",
+                    text = "$estimatedHistoryTokens / $historyTokenLimit токенов",
                     fontSize = 11.sp,
                     color = AppTheme.textMuted
                 )
@@ -286,72 +202,30 @@ fun AgentSettingsPanel(
                     .padding(16.dp)
             ) {
                 Text(
-                    text = "Session",
+                    text = "Сессия",
                     fontSize = 13.sp,
                     fontWeight = FontWeight.Medium,
                     color = AppTheme.textPrimary,
                     modifier = Modifier.padding(bottom = 12.dp)
                 )
 
-                StatRow("Tokens", "${sessionStats.totalTokens}")
-                StatRow("Cost", formatCost(sessionStats.totalCostUsd))
-                StatRow("Avg response", "%.1fs".format(sessionStats.avgResponseTimeSec))
-                StatRow("Messages", "${sessionStats.exchangeCount}")
+                StatRow("Токены", "${sessionStats.totalTokens}")
+                StatRow("Стоимость", formatCost(sessionStats.totalCostUsd))
+                StatRow("Ср. ответ", "%.1fs".format(sessionStats.avgResponseTimeSec))
             }
 
             Spacer(modifier = Modifier.height(16.dp))
         }
 
-        // Facts Panel (only for STICKY_FACTS strategy)
-        if (currentStrategy == ContextStrategy.STICKY_FACTS) {
-            FactsPanel(
-                facts = facts,
-                isExtractingFacts = isExtractingFacts,
-                factsUpdatedCount = factsUpdatedCount
-            )
-            Spacer(modifier = Modifier.height(16.dp))
-        }
-
-        // Strategy-specific settings
-        when (currentStrategy) {
-            ContextStrategy.SLIDING_WINDOW -> {
-                SettingSection("Window size (messages)") {
-                    OutlinedTextField(
-                        value = windowSizeText,
-                        onValueChange = onWindowSizeChanged,
-                        modifier = Modifier.fillMaxWidth(),
-                        placeholder = { Text("10", color = AppTheme.textMuted, fontSize = 14.sp) },
-                        singleLine = true,
-                        colors = textFieldSettingsColors(),
-                        shape = RoundedCornerShape(8.dp)
-                    )
-                }
-            }
-            ContextStrategy.STICKY_FACTS, ContextStrategy.BRANCHING -> {
-                SettingSection("Keep recent (messages)") {
-                    OutlinedTextField(
-                        value = keepRecentMessagesText,
-                        onValueChange = onKeepRecentMessagesChanged,
-                        modifier = Modifier.fillMaxWidth(),
-                        placeholder = { Text("10", color = AppTheme.textMuted, fontSize = 14.sp) },
-                        singleLine = true,
-                        colors = textFieldSettingsColors(),
-                        shape = RoundedCornerShape(8.dp)
-                    )
-                }
-            }
-        }
-
-        Spacer(modifier = Modifier.height(16.dp))
-
-        SettingSection("System prompt") {
+        // System prompt
+        SettingSection("Системный промпт") {
             OutlinedTextField(
                 value = systemPrompt,
                 onValueChange = onSystemPromptChanged,
                 modifier = Modifier
                     .fillMaxWidth()
                     .height(100.dp),
-                placeholder = { Text("Optional instructions...", color = AppTheme.textMuted, fontSize = 14.sp) },
+                placeholder = { Text("Инструкции для ассистента...", color = AppTheme.textMuted, fontSize = 14.sp) },
                 maxLines = 5,
                 colors = textFieldSettingsColors(),
                 shape = RoundedCornerShape(8.dp)
@@ -360,7 +234,8 @@ fun AgentSettingsPanel(
 
         Spacer(modifier = Modifier.height(16.dp))
 
-        SettingSection("Model") {
+        // Model
+        SettingSection("Модель") {
             ExposedDropdownMenuBox(
                 expanded = expanded,
                 onExpandedChange = { expanded = it }
@@ -406,7 +281,7 @@ fun AgentSettingsPanel(
             horizontalArrangement = Arrangement.spacedBy(12.dp)
         ) {
             Column(modifier = Modifier.weight(1f)) {
-                SettingSection("Temperature") {
+                SettingSection("Температура") {
                     OutlinedTextField(
                         value = temperatureText,
                         onValueChange = onTemperatureChanged,
@@ -419,7 +294,7 @@ fun AgentSettingsPanel(
                 }
             }
             Column(modifier = Modifier.weight(1f)) {
-                SettingSection("Max tokens") {
+                SettingSection("Max токенов") {
                     OutlinedTextField(
                         value = maxTokensText,
                         onValueChange = onMaxTokensChanged,
@@ -436,20 +311,37 @@ fun AgentSettingsPanel(
 }
 
 @Composable
-private fun FactsPanel(
-    facts: List<Fact>,
-    isExtractingFacts: Boolean,
-    factsUpdatedCount: Int
+private fun MemoryPanel(
+    memoryState: MemoryState,
+    selectedLayer: MemoryLayer,
+    isExpanded: Boolean,
+    onSelectLayer: (MemoryLayer) -> Unit,
+    onToggleExpanded: () -> Unit,
+    onAddToWorkingMemory: (String, String) -> Unit,
+    onRemoveFromWorkingMemory: (String) -> Unit,
+    onClearWorkingMemory: () -> Unit,
+    onUpdateProfile: (UserProfile) -> Unit,
+    onAddDecision: (String, String) -> Unit,
+    onRemoveDecision: (String) -> Unit,
+    onAddKnowledge: (String, String, String) -> Unit,
+    onRemoveKnowledge: (String) -> Unit,
+    onClearLongTermMemory: () -> Unit,
+    onSetShortTermLimit: (Int) -> Unit
 ) {
+    var showAddDialog by remember { mutableStateOf(false) }
+
     Column(
         modifier = Modifier
             .fillMaxWidth()
             .background(AppTheme.background, RoundedCornerShape(8.dp))
-            .border(1.dp, AppTheme.border, RoundedCornerShape(8.dp))
+            .border(1.dp, AppTheme.accent.copy(alpha = 0.3f), RoundedCornerShape(8.dp))
             .padding(16.dp)
     ) {
+        // Header
         Row(
-            modifier = Modifier.fillMaxWidth(),
+            modifier = Modifier
+                .fillMaxWidth()
+                .clickable { onToggleExpanded() },
             horizontalArrangement = Arrangement.SpaceBetween,
             verticalAlignment = Alignment.CenterVertically
         ) {
@@ -457,98 +349,802 @@ private fun FactsPanel(
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.spacedBy(8.dp)
             ) {
+                Text(text = "🧠", fontSize = 16.sp)
                 Text(
-                    text = "Sticky Facts",
-                    fontSize = 13.sp,
-                    fontWeight = FontWeight.Medium,
+                    text = "Память ассистента",
+                    fontSize = 14.sp,
+                    fontWeight = FontWeight.SemiBold,
                     color = AppTheme.textPrimary
                 )
-                if (isExtractingFacts) {
-                    Text(
-                        text = "extracting...",
-                        fontSize = 11.sp,
-                        color = AppTheme.textMuted
-                    )
-                } else if (factsUpdatedCount > 0) {
+            }
+            Text(
+                text = if (isExpanded) "▲" else "▼",
+                fontSize = 12.sp,
+                color = AppTheme.textMuted
+            )
+        }
+
+        if (isExpanded) {
+            Spacer(modifier = Modifier.height(16.dp))
+
+            // Layer tabs
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(6.dp)
+            ) {
+                MemoryLayer.entries.forEach { layer ->
+                    val isSelected = layer == selectedLayer
                     Box(
                         modifier = Modifier
-                            .background(Color(0xFFDCFCE7), RoundedCornerShape(4.dp))
-                            .padding(horizontal = 6.dp, vertical = 2.dp)
+                            .weight(1f)
+                            .clip(RoundedCornerShape(8.dp))
+                            .background(if (isSelected) AppTheme.accent else AppTheme.backgroundSecondary)
+                            .clickable { onSelectLayer(layer) }
+                            .padding(vertical = 10.dp),
+                        contentAlignment = Alignment.Center
                     ) {
-                        Text(
-                            text = "updated",
-                            fontSize = 10.sp,
-                            fontWeight = FontWeight.Medium,
-                            color = Color(0xFF166534)
-                        )
+                        Column(
+                            horizontalAlignment = Alignment.CenterHorizontally,
+                            verticalArrangement = Arrangement.spacedBy(4.dp)
+                        ) {
+                            Text(
+                                text = layer.icon,
+                                fontSize = 16.sp
+                            )
+                            Text(
+                                text = layer.label,
+                                fontSize = 11.sp,
+                                fontWeight = if (isSelected) FontWeight.Medium else FontWeight.Normal,
+                                color = if (isSelected) Color.White else AppTheme.textSecondary
+                            )
+                        }
                     }
                 }
             }
-            Text(
-                text = "${facts.size} facts",
-                fontSize = 11.sp,
-                color = AppTheme.textMuted
-            )
-        }
 
-        if (isExtractingFacts) {
-            Spacer(modifier = Modifier.height(12.dp))
-            LinearProgressIndicator(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .height(2.dp)
-                    .clip(RoundedCornerShape(1.dp)),
-                color = AppTheme.accent,
-                trackColor = AppTheme.border
-            )
-        }
+            Spacer(modifier = Modifier.height(16.dp))
 
-        if (facts.isNotEmpty()) {
-            Spacer(modifier = Modifier.height(12.dp))
-            Column(
-                verticalArrangement = Arrangement.spacedBy(8.dp)
-            ) {
-                facts.forEach { fact ->
-                    FactItem(fact)
-                }
+            // Layer content
+            when (selectedLayer) {
+                MemoryLayer.SHORT_TERM -> ShortTermMemoryContent(
+                    shortTerm = memoryState.shortTerm,
+                    onSetLimit = onSetShortTermLimit
+                )
+                MemoryLayer.WORKING -> WorkingMemoryContent(
+                    working = memoryState.working,
+                    onAdd = { showAddDialog = true },
+                    onRemove = onRemoveFromWorkingMemory,
+                    onClear = onClearWorkingMemory
+                )
+                MemoryLayer.LONG_TERM -> LongTermMemoryContent(
+                    longTerm = memoryState.longTerm,
+                    onUpdateProfile = onUpdateProfile,
+                    onAddDecision = onAddDecision,
+                    onRemoveDecision = onRemoveDecision,
+                    onAddKnowledge = onAddKnowledge,
+                    onRemoveKnowledge = onRemoveKnowledge,
+                    onClear = onClearLongTermMemory
+                )
             }
-        } else if (!isExtractingFacts) {
-            Spacer(modifier = Modifier.height(12.dp))
-            Text(
-                text = "Facts will be extracted automatically from conversation",
-                fontSize = 12.sp,
-                color = AppTheme.textMuted
+        }
+
+        // Add to working memory dialog
+        if (showAddDialog) {
+            AddWorkingMemoryDialog(
+                onDismiss = { showAddDialog = false },
+                onAdd = { label, content ->
+                    onAddToWorkingMemory(label, content)
+                    showAddDialog = false
+                }
             )
         }
     }
 }
 
 @Composable
-private fun FactItem(fact: Fact) {
+private fun ShortTermMemoryContent(
+    shortTerm: dev.skrip.aichallenge.domain.model.ShortTermMemory,
+    onSetLimit: (Int) -> Unit
+) {
+    var limitText by remember { mutableStateOf(shortTerm.maxMessages.toString()) }
+
+    Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+        Text(
+            text = "Последние сообщения текущего диалога. Автоматически отправляются в каждом запросе.",
+            fontSize = 12.sp,
+            color = AppTheme.textMuted,
+            lineHeight = 18.sp
+        )
+
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Text(
+                text = "В памяти: ${shortTerm.recentMessages.size} сообщений",
+                fontSize = 13.sp,
+                fontWeight = FontWeight.Medium,
+                color = AppTheme.textSecondary
+            )
+        }
+
+        Row(
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(8.dp)
+        ) {
+            Text(
+                text = "Лимит:",
+                fontSize = 12.sp,
+                color = AppTheme.textTertiary
+            )
+            OutlinedTextField(
+                value = limitText,
+                onValueChange = {
+                    limitText = it
+                    it.toIntOrNull()?.let { limit -> onSetLimit(limit) }
+                },
+                modifier = Modifier.width(80.dp),
+                singleLine = true,
+                colors = textFieldSettingsColors(),
+                shape = RoundedCornerShape(6.dp)
+            )
+            Text(
+                text = "сообщений",
+                fontSize = 12.sp,
+                color = AppTheme.textTertiary
+            )
+        }
+    }
+}
+
+@Composable
+private fun WorkingMemoryContent(
+    working: dev.skrip.aichallenge.domain.model.WorkingMemory,
+    onAdd: () -> Unit,
+    onRemove: (String) -> Unit,
+    onClear: () -> Unit
+) {
+    Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+        Text(
+            text = "Данные текущей задачи. Добавляйте важную информацию, которую ассистент должен помнить.",
+            fontSize = 12.sp,
+            color = AppTheme.textMuted,
+            lineHeight = 18.sp
+        )
+
+        // Action buttons
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            Box(
+                modifier = Modifier
+                    .clip(RoundedCornerShape(6.dp))
+                    .background(AppTheme.accent)
+                    .clickable { onAdd() }
+                    .padding(horizontal = 14.dp, vertical = 8.dp)
+            ) {
+                Text(
+                    text = "+ Добавить",
+                    fontSize = 13.sp,
+                    fontWeight = FontWeight.Medium,
+                    color = Color.White
+                )
+            }
+
+            if (working.items.isNotEmpty()) {
+                Box(
+                    modifier = Modifier
+                        .clip(RoundedCornerShape(6.dp))
+                        .background(AppTheme.backgroundSecondary)
+                        .border(1.dp, AppTheme.border, RoundedCornerShape(6.dp))
+                        .clickable { onClear() }
+                        .padding(horizontal = 14.dp, vertical = 8.dp)
+                ) {
+                    Text(
+                        text = "Очистить",
+                        fontSize = 13.sp,
+                        color = AppTheme.textTertiary
+                    )
+                }
+            }
+        }
+
+        // Items list
+        if (working.items.isNotEmpty()) {
+            working.items.forEach { item ->
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .background(AppTheme.backgroundSecondary, RoundedCornerShape(8.dp))
+                        .padding(12.dp),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.Top
+                ) {
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text(
+                            text = item.label,
+                            fontSize = 13.sp,
+                            fontWeight = FontWeight.SemiBold,
+                            color = AppTheme.textPrimary
+                        )
+                        Text(
+                            text = item.content,
+                            fontSize = 12.sp,
+                            color = AppTheme.textSecondary,
+                            lineHeight = 18.sp
+                        )
+                    }
+                    Text(
+                        text = "×",
+                        fontSize = 18.sp,
+                        color = AppTheme.textMuted,
+                        modifier = Modifier
+                            .clickable { onRemove(item.id) }
+                            .padding(4.dp)
+                    )
+                }
+            }
+        } else {
+            Text(
+                text = "Пусто. Добавьте данные для текущей задачи.",
+                fontSize = 12.sp,
+                color = AppTheme.textMuted,
+                modifier = Modifier.padding(vertical = 8.dp)
+            )
+        }
+    }
+}
+
+@Composable
+private fun LongTermMemoryContent(
+    longTerm: dev.skrip.aichallenge.domain.model.LongTermMemory,
+    onUpdateProfile: (UserProfile) -> Unit,
+    onAddDecision: (String, String) -> Unit,
+    onRemoveDecision: (String) -> Unit,
+    onAddKnowledge: (String, String, String) -> Unit,
+    onRemoveKnowledge: (String) -> Unit,
+    onClear: () -> Unit
+) {
+    var showProfileDialog by remember { mutableStateOf(false) }
+    var showDecisionDialog by remember { mutableStateOf(false) }
+    var showKnowledgeDialog by remember { mutableStateOf(false) }
+
+    Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+        Text(
+            text = "Постоянная память: профиль пользователя, важные решения, база знаний.",
+            fontSize = 12.sp,
+            color = AppTheme.textMuted,
+            lineHeight = 18.sp
+        )
+
+        // Action buttons
+        Row(
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+            modifier = Modifier.fillMaxWidth()
+        ) {
+            ActionButton(
+                text = "👤 Профиль",
+                isAccent = true,
+                onClick = { showProfileDialog = true }
+            )
+            ActionButton(
+                text = "+ Решение",
+                onClick = { showDecisionDialog = true }
+            )
+            ActionButton(
+                text = "+ Знание",
+                onClick = { showKnowledgeDialog = true }
+            )
+        }
+
+        // Profile info
+        if (longTerm.profile.name.isNotBlank() || longTerm.profile.context.isNotBlank()) {
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .background(AppTheme.backgroundSecondary, RoundedCornerShape(8.dp))
+                    .padding(12.dp),
+                horizontalArrangement = Arrangement.spacedBy(10.dp)
+            ) {
+                Text(text = "👤", fontSize = 14.sp)
+                Column {
+                    if (longTerm.profile.name.isNotBlank()) {
+                        Text(
+                            text = longTerm.profile.name,
+                            fontSize = 13.sp,
+                            fontWeight = FontWeight.SemiBold,
+                            color = AppTheme.textPrimary
+                        )
+                    }
+                    if (longTerm.profile.context.isNotBlank()) {
+                        Text(
+                            text = longTerm.profile.context,
+                            fontSize = 12.sp,
+                            color = AppTheme.textSecondary,
+                            lineHeight = 18.sp
+                        )
+                    }
+                }
+            }
+        }
+
+        // Decisions
+        if (longTerm.decisions.isNotEmpty()) {
+            Text(
+                text = "Решения (${longTerm.decisions.size}):",
+                fontSize = 12.sp,
+                fontWeight = FontWeight.Medium,
+                color = AppTheme.textTertiary
+            )
+            longTerm.decisions.forEach { decision ->
+                MemoryItem(
+                    icon = "📋",
+                    title = decision.title,
+                    content = decision.description,
+                    onRemove = { onRemoveDecision(decision.id) }
+                )
+            }
+        }
+
+        // Knowledge
+        if (longTerm.knowledge.isNotEmpty()) {
+            Text(
+                text = "Знания (${longTerm.knowledge.size}):",
+                fontSize = 12.sp,
+                fontWeight = FontWeight.Medium,
+                color = AppTheme.textTertiary
+            )
+            longTerm.knowledge.forEach { item ->
+                MemoryItem(
+                    icon = "📚",
+                    title = "[${item.category}] ${item.title}",
+                    content = item.content,
+                    onRemove = { onRemoveKnowledge(item.id) }
+                )
+            }
+        }
+
+        // Clear button
+        if (longTerm.profile.name.isNotBlank() || longTerm.decisions.isNotEmpty() || longTerm.knowledge.isNotEmpty()) {
+            Box(
+                modifier = Modifier
+                    .clip(RoundedCornerShape(6.dp))
+                    .background(Color(0xFFFEE2E2))
+                    .clickable { onClear() }
+                    .padding(horizontal = 12.dp, vertical = 8.dp)
+            ) {
+                Text(
+                    text = "Очистить всю долговременную память",
+                    fontSize = 12.sp,
+                    color = Color(0xFFDC2626)
+                )
+            }
+        }
+    }
+
+    // Dialogs
+    if (showProfileDialog) {
+        ProfileDialog(
+            currentProfile = longTerm.profile,
+            onDismiss = { showProfileDialog = false },
+            onSave = { profile ->
+                onUpdateProfile(profile)
+                showProfileDialog = false
+            }
+        )
+    }
+
+    if (showDecisionDialog) {
+        DecisionDialog(
+            onDismiss = { showDecisionDialog = false },
+            onAdd = { title, description ->
+                onAddDecision(title, description)
+                showDecisionDialog = false
+            }
+        )
+    }
+
+    if (showKnowledgeDialog) {
+        KnowledgeDialog(
+            onDismiss = { showKnowledgeDialog = false },
+            onAdd = { category, title, content ->
+                onAddKnowledge(category, title, content)
+                showKnowledgeDialog = false
+            }
+        )
+    }
+}
+
+@Composable
+private fun ActionButton(
+    text: String,
+    isAccent: Boolean = false,
+    onClick: () -> Unit
+) {
+    Box(
+        modifier = Modifier
+            .clip(RoundedCornerShape(6.dp))
+            .background(if (isAccent) AppTheme.accent else AppTheme.backgroundSecondary)
+            .then(
+                if (!isAccent) Modifier.border(1.dp, AppTheme.border, RoundedCornerShape(6.dp))
+                else Modifier
+            )
+            .clickable(onClick = onClick)
+            .padding(horizontal = 12.dp, vertical = 8.dp)
+    ) {
+        Text(
+            text = text,
+            fontSize = 12.sp,
+            fontWeight = if (isAccent) FontWeight.Medium else FontWeight.Normal,
+            color = if (isAccent) Color.White else AppTheme.textSecondary
+        )
+    }
+}
+
+@Composable
+private fun MemoryItem(
+    icon: String,
+    title: String,
+    content: String,
+    onRemove: () -> Unit
+) {
     Row(
         modifier = Modifier
             .fillMaxWidth()
-            .background(AppTheme.backgroundSecondary, RoundedCornerShape(6.dp))
+            .background(AppTheme.backgroundSecondary, RoundedCornerShape(8.dp))
             .padding(10.dp),
-        horizontalArrangement = Arrangement.spacedBy(8.dp)
+        horizontalArrangement = Arrangement.SpaceBetween,
+        verticalAlignment = Alignment.Top
     ) {
+        Column(modifier = Modifier.weight(1f)) {
+            Text(
+                text = "$icon $title",
+                fontSize = 12.sp,
+                fontWeight = FontWeight.Medium,
+                color = AppTheme.textPrimary
+            )
+            if (content.isNotBlank()) {
+                Text(
+                    text = content,
+                    fontSize = 11.sp,
+                    color = AppTheme.textSecondary,
+                    lineHeight = 16.sp
+                )
+            }
+        }
         Text(
-            text = fact.key,
-            fontSize = 12.sp,
-            fontWeight = FontWeight.Medium,
-            color = AppTheme.textPrimary
+            text = "×",
+            fontSize = 16.sp,
+            color = AppTheme.textMuted,
+            modifier = Modifier
+                .clickable(onClick = onRemove)
+                .padding(4.dp)
         )
-        Text(
-            text = ":",
-            fontSize = 12.sp,
-            color = AppTheme.textMuted
-        )
-        Text(
-            text = fact.value,
-            fontSize = 12.sp,
-            color = AppTheme.textSecondary,
-            modifier = Modifier.weight(1f)
-        )
+    }
+}
+
+@Composable
+private fun AddWorkingMemoryDialog(
+    onDismiss: () -> Unit,
+    onAdd: (String, String) -> Unit
+) {
+    var label by remember { mutableStateOf("") }
+    var content by remember { mutableStateOf("") }
+
+    androidx.compose.ui.window.Dialog(onDismissRequest = onDismiss) {
+        Column(
+            modifier = Modifier
+                .width(400.dp)
+                .background(AppTheme.background, RoundedCornerShape(12.dp))
+                .padding(24.dp),
+            verticalArrangement = Arrangement.spacedBy(16.dp)
+        ) {
+            Text(
+                text = "Добавить в рабочую память",
+                fontSize = 18.sp,
+                fontWeight = FontWeight.SemiBold,
+                color = AppTheme.textPrimary
+            )
+
+            OutlinedTextField(
+                value = label,
+                onValueChange = { label = it },
+                label = { Text("Название", fontSize = 13.sp) },
+                placeholder = { Text("Например: Текущая задача", fontSize = 13.sp) },
+                modifier = Modifier.fillMaxWidth(),
+                singleLine = true,
+                colors = textFieldSettingsColors(),
+                shape = RoundedCornerShape(8.dp)
+            )
+
+            OutlinedTextField(
+                value = content,
+                onValueChange = { content = it },
+                label = { Text("Содержимое", fontSize = 13.sp) },
+                placeholder = { Text("Что нужно запомнить...", fontSize = 13.sp) },
+                modifier = Modifier.fillMaxWidth().height(100.dp),
+                maxLines = 4,
+                colors = textFieldSettingsColors(),
+                shape = RoundedCornerShape(8.dp)
+            )
+
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.End
+            ) {
+                Text(
+                    text = "Отмена",
+                    fontSize = 14.sp,
+                    color = AppTheme.textTertiary,
+                    modifier = Modifier
+                        .clickable { onDismiss() }
+                        .padding(12.dp)
+                )
+                Spacer(modifier = Modifier.width(8.dp))
+                Box(
+                    modifier = Modifier
+                        .clip(RoundedCornerShape(8.dp))
+                        .background(if (label.isNotBlank() && content.isNotBlank()) AppTheme.accent else AppTheme.border)
+                        .clickable(enabled = label.isNotBlank() && content.isNotBlank()) {
+                            onAdd(label, content)
+                        }
+                        .padding(horizontal = 20.dp, vertical = 12.dp)
+                ) {
+                    Text(
+                        text = "Добавить",
+                        fontSize = 14.sp,
+                        fontWeight = FontWeight.Medium,
+                        color = Color.White
+                    )
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun ProfileDialog(
+    currentProfile: UserProfile,
+    onDismiss: () -> Unit,
+    onSave: (UserProfile) -> Unit
+) {
+    var name by remember { mutableStateOf(currentProfile.name) }
+    var context by remember { mutableStateOf(currentProfile.context) }
+
+    androidx.compose.ui.window.Dialog(onDismissRequest = onDismiss) {
+        Column(
+            modifier = Modifier
+                .width(400.dp)
+                .background(AppTheme.background, RoundedCornerShape(12.dp))
+                .padding(24.dp),
+            verticalArrangement = Arrangement.spacedBy(16.dp)
+        ) {
+            Text(
+                text = "Профиль пользователя",
+                fontSize = 18.sp,
+                fontWeight = FontWeight.SemiBold,
+                color = AppTheme.textPrimary
+            )
+
+            OutlinedTextField(
+                value = name,
+                onValueChange = { name = it },
+                label = { Text("Имя", fontSize = 13.sp) },
+                modifier = Modifier.fillMaxWidth(),
+                singleLine = true,
+                colors = textFieldSettingsColors(),
+                shape = RoundedCornerShape(8.dp)
+            )
+
+            OutlinedTextField(
+                value = context,
+                onValueChange = { context = it },
+                label = { Text("О себе", fontSize = 13.sp) },
+                placeholder = { Text("Кто вы, чем занимаетесь, предпочтения...", fontSize = 13.sp) },
+                modifier = Modifier.fillMaxWidth().height(120.dp),
+                maxLines = 5,
+                colors = textFieldSettingsColors(),
+                shape = RoundedCornerShape(8.dp)
+            )
+
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.End
+            ) {
+                Text(
+                    text = "Отмена",
+                    fontSize = 14.sp,
+                    color = AppTheme.textTertiary,
+                    modifier = Modifier
+                        .clickable { onDismiss() }
+                        .padding(12.dp)
+                )
+                Spacer(modifier = Modifier.width(8.dp))
+                Box(
+                    modifier = Modifier
+                        .clip(RoundedCornerShape(8.dp))
+                        .background(AppTheme.accent)
+                        .clickable { onSave(UserProfile(name = name, context = context)) }
+                        .padding(horizontal = 20.dp, vertical = 12.dp)
+                ) {
+                    Text(
+                        text = "Сохранить",
+                        fontSize = 14.sp,
+                        fontWeight = FontWeight.Medium,
+                        color = Color.White
+                    )
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun DecisionDialog(
+    onDismiss: () -> Unit,
+    onAdd: (String, String) -> Unit
+) {
+    var title by remember { mutableStateOf("") }
+    var description by remember { mutableStateOf("") }
+
+    androidx.compose.ui.window.Dialog(onDismissRequest = onDismiss) {
+        Column(
+            modifier = Modifier
+                .width(400.dp)
+                .background(AppTheme.background, RoundedCornerShape(12.dp))
+                .padding(24.dp),
+            verticalArrangement = Arrangement.spacedBy(16.dp)
+        ) {
+            Text(
+                text = "Добавить решение",
+                fontSize = 18.sp,
+                fontWeight = FontWeight.SemiBold,
+                color = AppTheme.textPrimary
+            )
+
+            OutlinedTextField(
+                value = title,
+                onValueChange = { title = it },
+                label = { Text("Название решения", fontSize = 13.sp) },
+                placeholder = { Text("Например: Использовать Kotlin", fontSize = 13.sp) },
+                modifier = Modifier.fillMaxWidth(),
+                singleLine = true,
+                colors = textFieldSettingsColors(),
+                shape = RoundedCornerShape(8.dp)
+            )
+
+            OutlinedTextField(
+                value = description,
+                onValueChange = { description = it },
+                label = { Text("Описание", fontSize = 13.sp) },
+                placeholder = { Text("Почему принято это решение...", fontSize = 13.sp) },
+                modifier = Modifier.fillMaxWidth().height(100.dp),
+                maxLines = 4,
+                colors = textFieldSettingsColors(),
+                shape = RoundedCornerShape(8.dp)
+            )
+
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.End
+            ) {
+                Text(
+                    text = "Отмена",
+                    fontSize = 14.sp,
+                    color = AppTheme.textTertiary,
+                    modifier = Modifier
+                        .clickable { onDismiss() }
+                        .padding(12.dp)
+                )
+                Spacer(modifier = Modifier.width(8.dp))
+                Box(
+                    modifier = Modifier
+                        .clip(RoundedCornerShape(8.dp))
+                        .background(if (title.isNotBlank()) AppTheme.accent else AppTheme.border)
+                        .clickable(enabled = title.isNotBlank()) {
+                            onAdd(title, description)
+                        }
+                        .padding(horizontal = 20.dp, vertical = 12.dp)
+                ) {
+                    Text(
+                        text = "Добавить",
+                        fontSize = 14.sp,
+                        fontWeight = FontWeight.Medium,
+                        color = Color.White
+                    )
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun KnowledgeDialog(
+    onDismiss: () -> Unit,
+    onAdd: (String, String, String) -> Unit
+) {
+    var category by remember { mutableStateOf("") }
+    var title by remember { mutableStateOf("") }
+    var content by remember { mutableStateOf("") }
+
+    androidx.compose.ui.window.Dialog(onDismissRequest = onDismiss) {
+        Column(
+            modifier = Modifier
+                .width(400.dp)
+                .background(AppTheme.background, RoundedCornerShape(12.dp))
+                .padding(24.dp),
+            verticalArrangement = Arrangement.spacedBy(16.dp)
+        ) {
+            Text(
+                text = "Добавить знание",
+                fontSize = 18.sp,
+                fontWeight = FontWeight.SemiBold,
+                color = AppTheme.textPrimary
+            )
+
+            OutlinedTextField(
+                value = category,
+                onValueChange = { category = it },
+                label = { Text("Категория", fontSize = 13.sp) },
+                placeholder = { Text("Например: Технологии", fontSize = 13.sp) },
+                modifier = Modifier.fillMaxWidth(),
+                singleLine = true,
+                colors = textFieldSettingsColors(),
+                shape = RoundedCornerShape(8.dp)
+            )
+
+            OutlinedTextField(
+                value = title,
+                onValueChange = { title = it },
+                label = { Text("Название", fontSize = 13.sp) },
+                placeholder = { Text("Например: API ключ", fontSize = 13.sp) },
+                modifier = Modifier.fillMaxWidth(),
+                singleLine = true,
+                colors = textFieldSettingsColors(),
+                shape = RoundedCornerShape(8.dp)
+            )
+
+            OutlinedTextField(
+                value = content,
+                onValueChange = { content = it },
+                label = { Text("Содержимое", fontSize = 13.sp) },
+                placeholder = { Text("Информация...", fontSize = 13.sp) },
+                modifier = Modifier.fillMaxWidth().height(100.dp),
+                maxLines = 4,
+                colors = textFieldSettingsColors(),
+                shape = RoundedCornerShape(8.dp)
+            )
+
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.End
+            ) {
+                Text(
+                    text = "Отмена",
+                    fontSize = 14.sp,
+                    color = AppTheme.textTertiary,
+                    modifier = Modifier
+                        .clickable { onDismiss() }
+                        .padding(12.dp)
+                )
+                Spacer(modifier = Modifier.width(8.dp))
+                Box(
+                    modifier = Modifier
+                        .clip(RoundedCornerShape(8.dp))
+                        .background(if (title.isNotBlank() && category.isNotBlank()) AppTheme.accent else AppTheme.border)
+                        .clickable(enabled = title.isNotBlank() && category.isNotBlank()) {
+                            onAdd(category, title, content)
+                        }
+                        .padding(horizontal = 20.dp, vertical = 12.dp)
+                ) {
+                    Text(
+                        text = "Добавить",
+                        fontSize = 14.sp,
+                        fontWeight = FontWeight.Medium,
+                        color = Color.White
+                    )
+                }
+            }
+        }
     }
 }
 
