@@ -3,6 +3,7 @@ package dev.skrip.aichallenge.ui.state
 import dev.skrip.aichallenge.domain.model.MemoryState
 import dev.skrip.aichallenge.domain.model.Message
 import dev.skrip.aichallenge.domain.model.ModelId
+import dev.skrip.aichallenge.domain.statemachine.TaskState
 import dev.skrip.aichallenge.util.estimateTokens
 
 data class ChatUiState(
@@ -26,7 +27,11 @@ data class ChatUiState(
 
     // Market data state
     val isLoadingMarketData: Boolean = false,
-    val lastMarketDataUpdate: Long? = null
+    val lastMarketDataUpdate: Long? = null,
+
+    // Task state machine (always enabled)
+    val taskState: TaskState? = null,
+    val taskError: String? = null
 ) {
     val estimatedHistoryTokens: Int
         get() = messages.sumOf { it.text.estimateTokens() }

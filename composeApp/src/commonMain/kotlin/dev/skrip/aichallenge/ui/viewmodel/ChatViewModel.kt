@@ -11,6 +11,11 @@ import dev.skrip.aichallenge.domain.model.TokenUsage
 import dev.skrip.aichallenge.domain.repository.ChatAgent
 import dev.skrip.aichallenge.domain.repository.ChatHistoryStorage
 import dev.skrip.aichallenge.domain.repository.MemoryManager
+import dev.skrip.aichallenge.domain.statemachine.ParsedResponse
+import dev.skrip.aichallenge.domain.statemachine.ResponseParser
+import dev.skrip.aichallenge.domain.statemachine.TaskPhase
+import dev.skrip.aichallenge.domain.statemachine.TaskPhasePrompts
+import dev.skrip.aichallenge.domain.statemachine.TaskStateMachine
 import dev.skrip.aichallenge.logging.AgentLogger
 import dev.skrip.aichallenge.logging.LogEntry
 import dev.skrip.aichallenge.ui.state.ChatUiState
@@ -33,7 +38,8 @@ class ChatViewModel(
     agentLogger: AgentLogger,
     private val historyStorage: ChatHistoryStorage,
     private val memoryManager: MemoryManager,
-    private val coinGeckoService: CoinGeckoService
+    private val coinGeckoService: CoinGeckoService,
+    private val taskStateMachine: TaskStateMachine
 ) {
     private val viewModelScope = CoroutineScope(SupervisorJob() + Dispatchers.Main)
 
@@ -52,6 +58,8 @@ class ChatViewModel(
         initializeMemory()
         loadHistory()
         observeMemoryState()
+        initializeTaskStateMachine()
+        observeTaskState()
     }
 
     private fun initializeMemory() {
@@ -64,6 +72,25 @@ class ChatViewModel(
         viewModelScope.launch {
             memoryManager.memoryState.collect { memoryState ->
                 updateState { copy(memoryState = memoryState) }
+            }
+        }
+    }
+
+    private fun initializeTaskStateMachine() {
+        viewModelScope.launch {
+            taskStateMachine.initialize()
+        }
+    }
+
+    private fun observeTaskState() {
+        viewModelScope.launch {
+            taskStateMachine.state.collect { taskState ->
+                updateState { copy(taskState = taskState) }
+            }
+        }
+        viewModelScope.launch {
+            taskStateMachine.error.collect { error ->
+                updateState { copy(taskError = error?.message) }
             }
         }
     }
@@ -117,6 +144,23 @@ class ChatViewModel(
 
             // Memory
             is ChatViewEvent.ClearAllMemory -> clearAllMemory()
+
+            // Task State Machine events
+            is ChatViewEvent.StartTask -> handleStartTask(event.request)
+            is ChatViewEvent.StartClarifying -> handleStartClarifying(event.questions)
+            is ChatViewEvent.AnswerQuestion -> handleAnswerQuestion(event.question, event.answer)
+            is ChatViewEvent.CompleteClarifying -> handleCompleteClarifying(event.requirements)
+            is ChatViewEvent.StartPlanning -> handleStartPlanning()
+            is ChatViewEvent.SubmitPlan -> handleSubmitPlan(event.steps, event.complexity, event.risks)
+            is ChatViewEvent.ApprovePlan -> handleApprovePlan()
+            is ChatViewEvent.RejectPlan -> handleRejectPlan(event.reason, event.goToClarifying)
+            is ChatViewEvent.CompleteStep -> handleCompleteStep(event.output, event.success, event.error)
+            is ChatViewEvent.ApproveStep -> handleApproveStep()
+            is ChatViewEvent.SubmitValidation -> handleSubmitValidation(event.checks, event.summary)
+            is ChatViewEvent.ApproveValidation -> handleApproveValidation()
+            is ChatViewEvent.PauseTask -> handlePauseTask(event.reason)
+            is ChatViewEvent.ResumeTask -> handleResumeTask()
+            is ChatViewEvent.CancelTask -> handleCancelTask()
         }
     }
 
@@ -129,6 +173,18 @@ class ChatViewModel(
         val userMessageText = currentState.inputText.trim()
 
         if (userMessageText.isBlank() || currentState.isLoading || currentState.isStreaming) return
+
+        // Auto-start task and move to planning
+        val existingTask = taskStateMachine.state.value
+        println("[TASK] Existing task phase: ${existingTask?.currentPhase?.name ?: "null"}")
+        if (existingTask == null ||
+            existingTask.currentPhase is TaskPhase.Idle ||
+            existingTask.currentPhase is TaskPhase.Completed) {
+            val startResult = taskStateMachine.startTask(userMessageText)
+            println("[TASK] startTask result: ${startResult.isSuccess}, phase: ${taskStateMachine.state.value?.currentPhase?.name}")
+            val planResult = taskStateMachine.startPlanning()
+            println("[TASK] startPlanning result: ${planResult.isSuccess}, phase: ${taskStateMachine.state.value?.currentPhase?.name}")
+        }
 
         // Update state to show loading
         updateState {
@@ -220,6 +276,9 @@ class ChatViewModel(
                             // Update short-term memory
                             memoryManager.updateShortTermMemory(updatedMessages)
                             saveHistory()
+
+                            // Process AI response for state machine
+                            processAIResponse(fullText.toString())
                         }
                         is StreamingEvent.Error -> {
                             updateState {
@@ -312,13 +371,8 @@ class ChatViewModel(
 
         val profile = state.memoryState.longTerm.profile
 
-        // Build crypto consultant system prompt
-        val systemPrompt = buildString {
-            // Base role
-            appendLine(CRYPTO_CONSULTANT_PROMPT)
-            appendLine()
-
-            // User profile as ДАНО
+        // Build context (profile + market data) that's always included
+        val contextSection = buildString {
             appendLine("=== ДАННЫЕ КЛИЕНТА ===")
             appendLine("Депозит: ${profile.formattedDeposit}")
             appendLine("Цель: +${profile.targetPercent.toInt()}% за ${profile.targetDays} дн.")
@@ -326,7 +380,6 @@ class ChatViewModel(
             appendLine("Горизонт: ${profile.investmentHorizon.label}")
             appendLine()
 
-            // Market data
             if (marketData.isNotEmpty()) {
                 append(coinGeckoService.formatMarketDataForContext(
                     coins = marketData,
@@ -334,6 +387,18 @@ class ChatViewModel(
                     limit = 20
                 ))
             }
+        }
+
+        // Get phase-specific prompt (includes base crypto assistant instructions)
+        val taskPhasePrompt = buildTaskPhasePrompt()
+
+        val systemPrompt = buildString {
+            // Phase-specific prompt (or default crypto consultant prompt)
+            appendLine(taskPhasePrompt ?: CRYPTO_CONSULTANT_PROMPT)
+            appendLine()
+
+            // Always include context
+            append(contextSection)
 
             // User's additional prompt
             if (state.systemPromptText.isNotBlank()) {
@@ -407,6 +472,387 @@ class ChatViewModel(
         viewModelScope.launch {
             historyStorage.clearHistory()
             memoryManager.clearAllMemory()
+        }
+    }
+
+    // Task State Machine handlers
+
+    private fun handleStartTask(request: String) {
+        taskStateMachine.startTask(request).onFailure { error ->
+            updateState { copy(taskError = error.message) }
+        }
+    }
+
+    private fun handleStartClarifying(questions: List<String>) {
+        taskStateMachine.startClarifying(questions).onFailure { error ->
+            updateState { copy(taskError = error.message) }
+        }
+    }
+
+    private fun handleAnswerQuestion(question: String, answer: String) {
+        taskStateMachine.answerQuestion(question, answer).onFailure { error ->
+            updateState { copy(taskError = error.message) }
+        }
+    }
+
+    private fun handleCompleteClarifying(requirements: String) {
+        taskStateMachine.completeClarifying(requirements).onFailure { error ->
+            updateState { copy(taskError = error.message) }
+        }
+    }
+
+    private fun handleStartPlanning() {
+        taskStateMachine.startPlanning().onFailure { error ->
+            updateState { copy(taskError = error.message) }
+        }
+    }
+
+    private fun handleSubmitPlan(
+        steps: List<dev.skrip.aichallenge.domain.statemachine.PlanStep>,
+        complexity: String,
+        risks: List<String>
+    ) {
+        taskStateMachine.submitPlan(steps, complexity, risks).onFailure { error ->
+            updateState { copy(taskError = error.message) }
+        }
+    }
+
+    private fun handleApprovePlan() {
+        taskStateMachine.approvePlan().onSuccess {
+            // Auto-start first step execution
+            continueWithNextStep()
+        }.onFailure { error ->
+            updateState { copy(taskError = error.message) }
+        }
+    }
+
+    private fun handleRejectPlan(reason: String, goToClarifying: Boolean) {
+        taskStateMachine.rejectPlan(reason, goToClarifying).onFailure { error ->
+            updateState { copy(taskError = error.message) }
+        }
+    }
+
+    private fun handleCompleteStep(output: String, success: Boolean, error: String?) {
+        taskStateMachine.completeStep(output, success, error).onFailure { err ->
+            updateState { copy(taskError = err.message) }
+        }
+    }
+
+    private fun handleApproveStep() {
+        taskStateMachine.approveStep().onFailure { error ->
+            updateState { copy(taskError = error.message) }
+        }
+    }
+
+    private fun handleSubmitValidation(
+        checks: List<dev.skrip.aichallenge.domain.statemachine.ValidationCheck>,
+        summary: String
+    ) {
+        taskStateMachine.submitValidation(checks, summary).onFailure { error ->
+            updateState { copy(taskError = error.message) }
+        }
+    }
+
+    private fun handleApproveValidation() {
+        taskStateMachine.approveValidation().onFailure { error ->
+            updateState { copy(taskError = error.message) }
+        }
+    }
+
+    private fun handlePauseTask(reason: String) {
+        println("[TASK] handlePauseTask called, current phase: ${taskStateMachine.state.value?.currentPhase?.name}")
+
+        // Stop any ongoing streaming
+        streamingJob?.cancel()
+        streamingJob = null
+
+        taskStateMachine.pause(reason).onSuccess {
+            println("[TASK] Pause SUCCESS, new phase: ${it.currentPhase.name}")
+            updateState {
+                copy(
+                    isLoading = false,
+                    isStreaming = false,
+                    streamingText = ""
+                )
+            }
+        }.onFailure { error ->
+            println("[TASK] Pause FAILED: ${error.message}")
+            updateState { copy(taskError = error.message) }
+        }
+    }
+
+    private fun handleResumeTask() {
+        println("[TASK] handleResumeTask called")
+        taskStateMachine.resume().onSuccess {
+            println("[TASK] Resume SUCCESS, new phase: ${it.currentPhase.name}")
+            // After resume, continue execution if we were in Executing phase
+            checkAndContinueExecution()
+        }.onFailure { error ->
+            println("[TASK] Resume FAILED: ${error.message}")
+            updateState { copy(taskError = error.message) }
+        }
+    }
+
+    private fun handleCancelTask() {
+        println("[TASK] handleCancelTask called, current phase: ${taskStateMachine.state.value?.currentPhase?.name}")
+
+        // Stop any ongoing streaming
+        streamingJob?.cancel()
+        streamingJob = null
+
+        taskStateMachine.cancel().onSuccess {
+            println("[TASK] Cancel SUCCESS, new phase: ${it.currentPhase.name}")
+            updateState {
+                copy(
+                    isLoading = false,
+                    isStreaming = false,
+                    streamingText = "",
+                    taskError = null
+                )
+            }
+        }.onFailure { error ->
+            println("[TASK] Cancel FAILED: ${error.message}")
+            updateState { copy(taskError = error.message) }
+        }
+    }
+
+    /**
+     * Build system prompt based on current task phase
+     * Reads directly from state machine to avoid race conditions
+     */
+    private fun buildTaskPhasePrompt(): String? {
+        val taskState = taskStateMachine.state.value
+        println("[TASK] buildTaskPhasePrompt - phase: ${taskState?.currentPhase?.name ?: "null"}")
+        if (taskState == null) return null
+        val prompt = TaskPhasePrompts.buildPrompt(taskState)
+        println("[TASK] Using prompt for phase: ${taskState.currentPhase.name}, length: ${prompt.length}")
+        return prompt
+    }
+
+    /**
+     * Process AI response and update state machine accordingly
+     */
+    private fun processAIResponse(response: String) {
+        val taskState = taskStateMachine.state.value
+        println("[TASK] processAIResponse - taskState: ${taskState?.currentPhase?.name ?: "null"}")
+        if (taskState == null) return
+        val currentPhase = taskState.currentPhase
+
+        // Skip processing for idle/completed/paused tasks
+        if (currentPhase is TaskPhase.Idle ||
+            currentPhase is TaskPhase.Completed ||
+            currentPhase is TaskPhase.Paused) {
+            println("[TASK] Skipping response processing - task is ${currentPhase.name}")
+            return
+        }
+
+        val parsed = ResponseParser.parse(response, currentPhase)
+        println("[TASK] Parsed response: $parsed")
+
+        when (parsed) {
+            is ParsedResponse.NoAction -> {
+                // No structured output detected, continue waiting
+                println("[TASK] NoAction - waiting for proper response format")
+            }
+
+            is ParsedResponse.MoveToPlanningPhase -> {
+                // Already in planning, request a plan
+                if (currentPhase is TaskPhase.Planning) {
+                    sendInternalMessage("Create a detailed execution plan for this task.")
+                }
+            }
+
+            is ParsedResponse.StartClarifying -> {
+                taskStateMachine.startClarifying(parsed.questions)
+            }
+
+            is ParsedResponse.AddQuestions -> {
+                // If already clarifying, just update questions
+                if (currentPhase is TaskPhase.Clarifying) {
+                    // Questions are added through the prompt context
+                }
+            }
+
+            is ParsedResponse.CompleteRequirements -> {
+                if (currentPhase is TaskPhase.Clarifying) {
+                    taskStateMachine.completeClarifying(parsed.requirements)
+                    // Auto-transition to planning
+                    taskStateMachine.startPlanning()
+                }
+            }
+
+            is ParsedResponse.SubmitPlan -> {
+                val plan = parsed.plan
+                // Submit the plan (we should already be in Planning phase)
+                if (currentPhase is TaskPhase.Planning) {
+                    taskStateMachine.submitPlan(
+                        steps = plan.steps,
+                        complexity = plan.complexity,
+                        risks = plan.risks
+                    )
+                    println("[TASK] Plan submitted with ${plan.steps.size} steps")
+                }
+            }
+
+            is ParsedResponse.CompleteStep -> {
+                if (currentPhase is TaskPhase.Executing) {
+                    taskStateMachine.completeStep(
+                        output = parsed.output,
+                        success = parsed.success
+                    )
+                    // Auto-approve step and continue
+                    taskStateMachine.approveStep()
+                }
+            }
+
+            is ParsedResponse.SubmitValidation -> {
+                if (currentPhase is TaskPhase.Validating) {
+                    taskStateMachine.submitValidation(
+                        checks = parsed.checks,
+                        summary = parsed.summary
+                    )
+                    // Auto-approve if all passed
+                    if (parsed.allPassed) {
+                        taskStateMachine.approveValidation()
+                    }
+                }
+            }
+        }
+
+        // Check if we need to continue execution automatically
+        checkAndContinueExecution()
+    }
+
+    /**
+     * Check if the current phase requires automatic continuation
+     * and trigger the next AI request if needed
+     */
+    private fun checkAndContinueExecution() {
+        val taskState = taskStateMachine.state.value ?: return
+
+        when (val phase = taskState.currentPhase) {
+            is TaskPhase.Executing -> {
+                // If step is approved and we're not at the end, continue
+                if (phase.isStepApproved && phase.currentStepIndex < phase.totalSteps) {
+                    continueWithNextStep()
+                }
+            }
+            is TaskPhase.Validating -> {
+                // If we just entered validation, trigger validation
+                if (phase.validationChecks.isEmpty()) {
+                    triggerValidation()
+                }
+            }
+            else -> {
+                // No automatic continuation needed
+            }
+        }
+    }
+
+    /**
+     * Continue execution with the next step
+     */
+    private fun continueWithNextStep() {
+        val taskState = taskStateMachine.state.value ?: return
+        val phase = taskState.currentPhase as? TaskPhase.Executing ?: return
+        val currentStep = taskState.planSteps.getOrNull(phase.currentStepIndex) ?: return
+
+        // Send a system message to trigger next step execution
+        val stepMessage = "Execute step ${phase.currentStepIndex + 1}: ${currentStep.title}"
+        sendInternalMessage(stepMessage)
+    }
+
+    /**
+     * Trigger validation phase
+     */
+    private fun triggerValidation() {
+        sendInternalMessage("Validate the completed task and provide validation report.")
+    }
+
+    /**
+     * Send an internal message to continue the task flow
+     */
+    private fun sendInternalMessage(message: String) {
+        viewModelScope.launch {
+            // Small delay to avoid rapid-fire requests
+            kotlinx.coroutines.delay(500)
+
+            val currentState = _uiState.value
+            if (currentState.isLoading || currentState.isStreaming) return@launch
+
+            // Fetch market data
+            val marketData = fetchMarketDataIfNeeded()
+            val config = buildAgentConfig(currentState, marketData)
+
+            val shortTermLimit = currentState.memoryState.shortTerm.maxMessages
+            val contextMessages = currentState.messages.takeLast(shortTermLimit)
+            val trimmedHistory = trimHistoryToTokenLimit(contextMessages, config.historyTokenLimit)
+
+            // Add internal message to UI
+            val internalMessage = Message(
+                id = generateId(),
+                role = Role.USER,
+                text = "[Auto] $message",
+                timestamp = currentTimeMillis()
+            )
+
+            updateState {
+                copy(
+                    messages = messages + internalMessage,
+                    isLoading = true,
+                    isStreaming = false
+                )
+            }
+
+            streamingJob = launch {
+                val fullText = StringBuilder()
+
+                chatAgent.sendMessageStreaming(
+                    userMessage = message,
+                    history = trimmedHistory + internalMessage,
+                    config = config
+                ).collect { event ->
+                    when (event) {
+                        is StreamingEvent.TextDelta -> {
+                            fullText.append(event.text)
+                            updateState { copy(streamingText = fullText.toString(), isStreaming = true) }
+                        }
+                        is StreamingEvent.Complete -> {
+                            val assistantMessage = Message(
+                                id = generateId(),
+                                role = Role.ASSISTANT,
+                                text = fullText.toString(),
+                                timestamp = currentTimeMillis(),
+                                usage = event.usage
+                            )
+
+                            val updatedMessages = _uiState.value.messages + assistantMessage
+                            updateState {
+                                copy(
+                                    messages = updatedMessages,
+                                    isLoading = false,
+                                    isStreaming = false,
+                                    streamingText = ""
+                                )
+                            }
+
+                            memoryManager.updateShortTermMemory(updatedMessages)
+                            saveHistory()
+                            processAIResponse(fullText.toString())
+                        }
+                        is StreamingEvent.Error -> {
+                            updateState {
+                                copy(
+                                    isLoading = false,
+                                    isStreaming = false,
+                                    streamingText = "",
+                                    errorMessage = event.message
+                                )
+                            }
+                        }
+                    }
+                }
+            }
         }
     }
 

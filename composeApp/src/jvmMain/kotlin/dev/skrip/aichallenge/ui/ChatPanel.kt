@@ -48,6 +48,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import dev.skrip.aichallenge.domain.model.Message
 import dev.skrip.aichallenge.domain.model.Role
+import dev.skrip.aichallenge.domain.statemachine.TaskState
 import dev.skrip.aichallenge.util.estimateTokens
 import java.awt.Toolkit
 import java.awt.datatransfer.StringSelection
@@ -60,9 +61,18 @@ fun ChatPanel(
     isStreaming: Boolean,
     streamingText: String,
     errorMessage: String?,
+    taskState: TaskState?,
+    taskError: String?,
     onInputChanged: (String) -> Unit,
     onSendClicked: () -> Unit,
     onStopClicked: () -> Unit,
+    onApprovePlan: () -> Unit,
+    onRejectPlan: (String) -> Unit,
+    onApproveStep: () -> Unit,
+    onApproveValidation: () -> Unit,
+    onPauseTask: () -> Unit,
+    onResumeTask: () -> Unit,
+    onCancelTask: () -> Unit,
     modifier: Modifier = Modifier
 ) {
     val listState = rememberLazyListState()
@@ -165,6 +175,20 @@ fun ChatPanel(
         }
 
         Spacer(modifier = Modifier.height(16.dp))
+
+        // Task Control Panel
+        TaskControlPanel(
+            taskState = taskState,
+            taskError = taskError,
+            onApprovePlan = onApprovePlan,
+            onRejectPlan = onRejectPlan,
+            onApproveStep = onApproveStep,
+            onApproveValidation = onApproveValidation,
+            onPause = onPauseTask,
+            onResume = onResumeTask,
+            onCancel = onCancelTask,
+            modifier = Modifier.padding(bottom = 12.dp)
+        )
 
         // Input area
         Row(

@@ -93,9 +93,18 @@ fun ChatApp(viewModel: ChatViewModel) {
                         isStreaming = uiState.isStreaming,
                         streamingText = uiState.streamingText,
                         errorMessage = uiState.errorMessage,
+                        taskState = uiState.taskState,
+                        taskError = uiState.taskError,
                         onInputChanged = { viewModel.onEvent(ChatViewEvent.InputChanged(it)) },
                         onSendClicked = { viewModel.onEvent(ChatViewEvent.SendClicked) },
                         onStopClicked = { viewModel.onEvent(ChatViewEvent.StopGeneration) },
+                        onApprovePlan = { viewModel.onEvent(ChatViewEvent.ApprovePlan) },
+                        onRejectPlan = { reason -> viewModel.onEvent(ChatViewEvent.RejectPlan(reason)) },
+                        onApproveStep = { viewModel.onEvent(ChatViewEvent.ApproveStep) },
+                        onApproveValidation = { viewModel.onEvent(ChatViewEvent.ApproveValidation) },
+                        onPauseTask = { viewModel.onEvent(ChatViewEvent.PauseTask()) },
+                        onResumeTask = { viewModel.onEvent(ChatViewEvent.ResumeTask) },
+                        onCancelTask = { viewModel.onEvent(ChatViewEvent.CancelTask) },
                         modifier = Modifier.weight(chatPanelWeight)
                     )
 
