@@ -21,25 +21,28 @@ object ResponseParser {
     }
 
     private fun parseIdleResponse(response: String): ParsedResponse {
-        // Check if AI is asking questions
-        val questions = extractQuestions(response)
-        if (questions.isNotEmpty()) {
-            return ParsedResponse.StartClarifying(questions)
-        }
+        // Only parse structured output - don't try to extract plans from regular responses
+        // This prevents triggering Task State Machine on simple Q&A or invariant refusals
 
-        // Check if AI generated a plan (various formats)
-        if (response.contains("```plan", ignoreCase = true) ||
-            response.contains("STEP 1", ignoreCase = true) ||
-            response.contains("Step 1:", ignoreCase = true) ||
-            response.contains("1.", ignoreCase = false) && response.contains("2.")) {
+        // Check for explicit plan block (requires intentional formatting)
+        if (response.contains("```plan", ignoreCase = true)) {
             val plan = extractPlan(response)
             if (plan != null && plan.steps.isNotEmpty()) {
                 return ParsedResponse.SubmitPlan(plan)
             }
         }
 
-        // Default: move to planning and request structured plan
-        return ParsedResponse.MoveToPlanningPhase
+        // Check if AI is explicitly asking clarifying questions with Q1:, Q2: format
+        if (response.contains("Q1:", ignoreCase = true) || response.contains("Q1.", ignoreCase = true)) {
+            val questions = extractQuestions(response)
+            if (questions.isNotEmpty()) {
+                return ParsedResponse.StartClarifying(questions)
+            }
+        }
+
+        // Default: no action - don't auto-start task state machine
+        // Task will only be started when AI explicitly provides structured output
+        return ParsedResponse.NoAction
     }
 
     private fun parseClarifyingResponse(response: String, phase: TaskPhase.Clarifying): ParsedResponse {
@@ -61,9 +64,15 @@ object ResponseParser {
     }
 
     private fun parsePlanningResponse(response: String): ParsedResponse {
-        val plan = extractPlan(response)
-        if (plan != null) {
-            return ParsedResponse.SubmitPlan(plan)
+        // Only extract plan if there's explicit structured output
+        // This prevents parsing regular numbered lists as plans
+        if (response.contains("```plan", ignoreCase = true) ||
+            response.contains("ПЛАН ВЫПОЛНЕНИЯ", ignoreCase = true) ||
+            response.contains("EXECUTION PLAN", ignoreCase = true)) {
+            val plan = extractPlan(response)
+            if (plan != null && plan.steps.size >= 2) { // Require at least 2 steps
+                return ParsedResponse.SubmitPlan(plan)
+            }
         }
         return ParsedResponse.NoAction
     }

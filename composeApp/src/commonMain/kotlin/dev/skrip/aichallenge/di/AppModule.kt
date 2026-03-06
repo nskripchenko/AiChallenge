@@ -5,7 +5,9 @@ import dev.skrip.aichallenge.data.remote.CoinGeckoService
 import dev.skrip.aichallenge.data.repository.AnthropicChatAgent
 import dev.skrip.aichallenge.data.repository.InMemoryMemoryManager
 import dev.skrip.aichallenge.data.repository.InMemoryTaskStateStorage
+import dev.skrip.aichallenge.data.repository.JsonInvariantStorage
 import dev.skrip.aichallenge.data.source.LlmDataSource
+import dev.skrip.aichallenge.domain.invariants.InvariantStorage
 import dev.skrip.aichallenge.domain.repository.ChatAgent
 import dev.skrip.aichallenge.domain.repository.MemoryManager
 import dev.skrip.aichallenge.domain.statemachine.TaskStateMachine
@@ -51,10 +53,11 @@ val dataModule = module {
     single { CoinGeckoService(get()) }
     single<TaskStateStorage> { InMemoryTaskStateStorage() }
     single { TaskStateMachine(get()) }
+    single<InvariantStorage> { JsonInvariantStorage() }
 }
 
 val viewModelModule = module {
-    single { ChatViewModel(get(), get(), get(), get(), get(), get()) }
+    single { ChatViewModel(get(), get(), get(), get(), get(), get(), get()) }
 }
 
 val appModules = listOf(networkModule, dataModule, viewModelModule)

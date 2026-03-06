@@ -3,6 +3,7 @@ package dev.skrip.aichallenge.ui.viewmodel
 import dev.skrip.aichallenge.data.remote.CoinGeckoService
 import dev.skrip.aichallenge.data.remote.dto.CoinMarketData
 import dev.skrip.aichallenge.data.source.StreamingEvent
+import dev.skrip.aichallenge.domain.invariants.InvariantStorage
 import dev.skrip.aichallenge.domain.model.AgentConfig
 import dev.skrip.aichallenge.domain.model.Message
 import dev.skrip.aichallenge.domain.model.ModelId
@@ -39,7 +40,8 @@ class ChatViewModel(
     private val historyStorage: ChatHistoryStorage,
     private val memoryManager: MemoryManager,
     private val coinGeckoService: CoinGeckoService,
-    private val taskStateMachine: TaskStateMachine
+    private val taskStateMachine: TaskStateMachine,
+    private val invariantStorage: InvariantStorage
 ) {
     private val viewModelScope = CoroutineScope(SupervisorJob() + Dispatchers.Main)
 
@@ -56,8 +58,10 @@ class ChatViewModel(
 
     init {
         initializeMemory()
+        initializeInvariants()
         loadHistory()
         observeMemoryState()
+        observeInvariantState()
         initializeTaskStateMachine()
         observeTaskState()
     }
@@ -65,6 +69,20 @@ class ChatViewModel(
     private fun initializeMemory() {
         viewModelScope.launch {
             memoryManager.initialize()
+        }
+    }
+
+    private fun initializeInvariants() {
+        viewModelScope.launch {
+            invariantStorage.initialize()
+        }
+    }
+
+    private fun observeInvariantState() {
+        viewModelScope.launch {
+            invariantStorage.state.collect { invariantState ->
+                updateState { copy(invariantState = invariantState) }
+            }
         }
     }
 
@@ -161,6 +179,13 @@ class ChatViewModel(
             is ChatViewEvent.PauseTask -> handlePauseTask(event.reason)
             is ChatViewEvent.ResumeTask -> handleResumeTask()
             is ChatViewEvent.CancelTask -> handleCancelTask()
+
+            // Invariant events
+            is ChatViewEvent.AddInvariant -> handleAddInvariant(event.invariant)
+            is ChatViewEvent.UpdateInvariant -> handleUpdateInvariant(event.invariant)
+            is ChatViewEvent.RemoveInvariant -> handleRemoveInvariant(event.id)
+            is ChatViewEvent.ToggleInvariant -> handleToggleInvariant(event.id, event.isActive)
+            is ChatViewEvent.ResetInvariants -> handleResetInvariants()
         }
     }
 
@@ -174,16 +199,16 @@ class ChatViewModel(
 
         if (userMessageText.isBlank() || currentState.isLoading || currentState.isStreaming) return
 
-        // Auto-start task and move to planning
-        val existingTask = taskStateMachine.state.value
-        println("[TASK] Existing task phase: ${existingTask?.currentPhase?.name ?: "null"}")
-        if (existingTask == null ||
-            existingTask.currentPhase is TaskPhase.Idle ||
-            existingTask.currentPhase is TaskPhase.Completed) {
-            val startResult = taskStateMachine.startTask(userMessageText)
-            println("[TASK] startTask result: ${startResult.isSuccess}, phase: ${taskStateMachine.state.value?.currentPhase?.name}")
-            val planResult = taskStateMachine.startPlanning()
-            println("[TASK] startPlanning result: ${planResult.isSuccess}, phase: ${taskStateMachine.state.value?.currentPhase?.name}")
+        // Check if user is requesting a structured task (plan creation)
+        val isTaskRequest = isTaskRequest(userMessageText)
+        if (isTaskRequest) {
+            val existingTask = taskStateMachine.state.value
+            if (existingTask == null ||
+                existingTask.currentPhase is TaskPhase.Idle ||
+                existingTask.currentPhase is TaskPhase.Completed) {
+                taskStateMachine.startTask(userMessageText)
+                taskStateMachine.startPlanning()
+            }
         }
 
         // Update state to show loading
@@ -392,10 +417,19 @@ class ChatViewModel(
         // Get phase-specific prompt (includes base crypto assistant instructions)
         val taskPhasePrompt = buildTaskPhasePrompt()
 
+        // Build invariants section (rules AI must never violate)
+        val invariantsSection = state.invariantState.buildPromptSection()
+
         val systemPrompt = buildString {
             // Phase-specific prompt (or default crypto consultant prompt)
             appendLine(taskPhasePrompt ?: CRYPTO_CONSULTANT_PROMPT)
             appendLine()
+
+            // Invariants (highest priority rules)
+            if (invariantsSection.isNotBlank()) {
+                appendLine(invariantsSection)
+                appendLine()
+            }
 
             // Always include context
             append(contextSection)
@@ -613,6 +647,38 @@ class ChatViewModel(
         }.onFailure { error ->
             println("[TASK] Cancel FAILED: ${error.message}")
             updateState { copy(taskError = error.message) }
+        }
+    }
+
+    // Invariant handlers
+
+    private fun handleAddInvariant(invariant: dev.skrip.aichallenge.domain.invariants.Invariant) {
+        viewModelScope.launch {
+            invariantStorage.addInvariant(invariant)
+        }
+    }
+
+    private fun handleUpdateInvariant(invariant: dev.skrip.aichallenge.domain.invariants.Invariant) {
+        viewModelScope.launch {
+            invariantStorage.updateInvariant(invariant)
+        }
+    }
+
+    private fun handleRemoveInvariant(id: String) {
+        viewModelScope.launch {
+            invariantStorage.removeInvariant(id)
+        }
+    }
+
+    private fun handleToggleInvariant(id: String, isActive: Boolean) {
+        viewModelScope.launch {
+            invariantStorage.toggleInvariant(id, isActive)
+        }
+    }
+
+    private fun handleResetInvariants() {
+        viewModelScope.launch {
+            invariantStorage.resetToDefaults()
         }
     }
 
@@ -854,6 +920,29 @@ class ChatViewModel(
                 }
             }
         }
+    }
+
+    /**
+     * Check if user message is requesting a structured task (plan creation)
+     */
+    private fun isTaskRequest(message: String): Boolean {
+        val lowerMessage = message.lowercase()
+        val taskKeywords = listOf(
+            "создай план",
+            "составь план",
+            "разработай план",
+            "сделай план",
+            "инвестиционный план",
+            "план инвестиций",
+            "план покупок",
+            "стратегию",
+            "пошаговый",
+            "пошагово",
+            "create plan",
+            "make a plan",
+            "investment plan"
+        )
+        return taskKeywords.any { lowerMessage.contains(it) }
     }
 
     companion object {

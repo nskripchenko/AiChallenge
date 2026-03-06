@@ -50,6 +50,7 @@ fun ChatApp(viewModel: ChatViewModel) {
 
     var showSettingsDialog by remember { mutableStateOf(false) }
     var showMemoryDialog by remember { mutableStateOf(false) }
+    var showInvariantsDialog by remember { mutableStateOf(false) }
 
     MaterialTheme {
         Surface(
@@ -62,7 +63,8 @@ fun ChatApp(viewModel: ChatViewModel) {
                 // App Header
                 AppHeader(
                     onSettingsClick = { showSettingsDialog = true },
-                    onMemoryClick = { showMemoryDialog = true }
+                    onMemoryClick = { showMemoryDialog = true },
+                    onInvariantsClick = { showInvariantsDialog = true }
                 )
 
                 // Main Content
@@ -162,13 +164,28 @@ fun ChatApp(viewModel: ChatViewModel) {
                 onDismiss = { showMemoryDialog = false }
             )
         }
+
+        // Invariants Dialog
+        if (showInvariantsDialog) {
+            InvariantsDialog(
+                invariantState = uiState.invariantState,
+                onToggleInvariant = { id, isActive ->
+                    viewModel.onEvent(ChatViewEvent.ToggleInvariant(id, isActive))
+                },
+                onResetInvariants = {
+                    viewModel.onEvent(ChatViewEvent.ResetInvariants)
+                },
+                onDismiss = { showInvariantsDialog = false }
+            )
+        }
     }
 }
 
 @Composable
 private fun AppHeader(
     onSettingsClick: () -> Unit,
-    onMemoryClick: () -> Unit
+    onMemoryClick: () -> Unit,
+    onInvariantsClick: () -> Unit
 ) {
     Row(
         modifier = Modifier
@@ -196,6 +213,15 @@ private fun AppHeader(
                 modifier = Modifier
                     .clip(RoundedCornerShape(4.dp))
                     .clickable { onMemoryClick() }
+                    .padding(horizontal = 12.dp, vertical = 6.dp)
+            )
+            Text(
+                text = "Rules",
+                fontSize = 12.sp,
+                color = AppTheme.accent,
+                modifier = Modifier
+                    .clip(RoundedCornerShape(4.dp))
+                    .clickable { onInvariantsClick() }
                     .padding(horizontal = 12.dp, vertical = 6.dp)
             )
             Text(

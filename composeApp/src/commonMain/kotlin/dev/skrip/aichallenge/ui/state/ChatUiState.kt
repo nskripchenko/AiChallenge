@@ -1,5 +1,6 @@
 package dev.skrip.aichallenge.ui.state
 
+import dev.skrip.aichallenge.domain.invariants.InvariantState
 import dev.skrip.aichallenge.domain.model.MemoryState
 import dev.skrip.aichallenge.domain.model.Message
 import dev.skrip.aichallenge.domain.model.ModelId
@@ -24,6 +25,9 @@ data class ChatUiState(
 
     // Memory state
     val memoryState: MemoryState = MemoryState(),
+
+    // Invariants state
+    val invariantState: InvariantState = InvariantState(),
 
     // Market data state
     val isLoadingMarketData: Boolean = false,

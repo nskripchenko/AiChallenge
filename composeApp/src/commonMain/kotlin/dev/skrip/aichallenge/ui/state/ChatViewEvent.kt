@@ -1,5 +1,6 @@
 package dev.skrip.aichallenge.ui.state
 
+import dev.skrip.aichallenge.domain.invariants.Invariant
 import dev.skrip.aichallenge.domain.model.ModelId
 import dev.skrip.aichallenge.domain.model.UserProfile
 import dev.skrip.aichallenge.domain.statemachine.PlanStep
@@ -49,4 +50,11 @@ sealed class ChatViewEvent {
     data class PauseTask(val reason: String = "") : ChatViewEvent()
     data object ResumeTask : ChatViewEvent()
     data object CancelTask : ChatViewEvent()
+
+    // Invariant events
+    data class AddInvariant(val invariant: Invariant) : ChatViewEvent()
+    data class UpdateInvariant(val invariant: Invariant) : ChatViewEvent()
+    data class RemoveInvariant(val id: String) : ChatViewEvent()
+    data class ToggleInvariant(val id: String, val isActive: Boolean) : ChatViewEvent()
+    data object ResetInvariants : ChatViewEvent()
 }

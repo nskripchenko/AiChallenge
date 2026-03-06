@@ -27,10 +27,35 @@ class TaskStateMachine(
 
     /**
      * Initialize or restore state
+     * Clears stale tasks that were left in incomplete states
      */
     suspend fun initialize() {
         val savedState = storage.loadState()
-        _state.value = savedState
+
+        // Clear stale tasks (planning without a submitted plan, etc.)
+        // These are likely from interrupted sessions
+        if (savedState != null) {
+            val phase = savedState.currentPhase
+            val shouldClear = when (phase) {
+                // Planning phase with no plan steps is stale
+                is TaskPhase.Planning -> phase.planSteps.isEmpty()
+                // Clarifying without pending questions but incomplete is stale
+                is TaskPhase.Clarifying -> true // Usually needs fresh start
+                // Other phases might be resumable, but for simplicity reset
+                is TaskPhase.Idle -> false // Already idle, keep it
+                is TaskPhase.Completed -> false // Completed, keep for history
+                else -> true // Reset executing/validating/paused for fresh start
+            }
+
+            if (shouldClear) {
+                _state.value = null
+                storage.clearState()
+            } else {
+                _state.value = savedState
+            }
+        } else {
+            _state.value = null
+        }
     }
 
     /**
