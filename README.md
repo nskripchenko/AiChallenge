@@ -1,48 +1,134 @@
-This is a Kotlin Multiplatform project targeting Android, iOS, Desktop (JVM).
+# Crypto Consultant
 
-* [/composeApp](./composeApp/src) is for code that will be shared across your Compose Multiplatform applications.
-  It contains several subfolders:
-  - [commonMain](./composeApp/src/commonMain/kotlin) is for code that’s common for all targets.
-  - Other folders are for Kotlin code that will be compiled for only the platform indicated in the folder name.
-    For example, if you want to use Apple’s CoreCrypto for the iOS part of your Kotlin app,
-    the [iosMain](./composeApp/src/iosMain/kotlin) folder would be the right place for such calls.
-    Similarly, if you want to edit the Desktop (JVM) specific part, the [jvmMain](./composeApp/src/jvmMain/kotlin)
-    folder is the appropriate location.
+Desktop-приложение для анализа криптовалют с AI-ассистентом на базе Claude.
 
-* [/iosApp](./iosApp/iosApp) contains iOS applications. Even if you’re sharing your UI with Compose Multiplatform,
-  you need this entry point for your iOS app. This is also where you should add SwiftUI code for your project.
+## Возможности
 
-### Build and Run Android Application
+- Анализ рынка криптовалют в реальном времени (CoinGecko API)
+- Персонализированные рекомендации на основе профиля
+- Расчёт точек входа, take-profit и stop-loss
+- Трёхуровневая модель памяти
+- Детерминированная стейт-машина для выполнения задач
+- Инварианты — правила, которые AI не может нарушить
+- MCP сервер для интеграции с Claude Desktop
 
-To build and run the development version of the Android app, use the run configuration from the run widget
-in your IDE’s toolbar or build it directly from the terminal:
-- on macOS/Linux
-  ```shell
-  ./gradlew :composeApp:assembleDebug
-  ```
-- on Windows
-  ```shell
-  .\gradlew.bat :composeApp:assembleDebug
-  ```
+## Структура проекта
 
-### Build and Run Desktop (JVM) Application
+```
+AiChallenge/
+├── composeApp/           # Kotlin Multiplatform приложение
+│   ├── commonMain/       # Общий код
+│   └── jvmMain/          # Desktop (JVM)
+├── iosApp/               # iOS приложение
+└── project-catalog-mcp/  # MCP сервер для анализа проекта
+```
 
-To build and run the development version of the desktop app, use the run configuration from the run widget
-in your IDE’s toolbar or run it directly from the terminal:
-- on macOS/Linux
-  ```shell
-  ./gradlew :composeApp:run
-  ```
-- on Windows
-  ```shell
-  .\gradlew.bat :composeApp:run
-  ```
+## Запуск приложения
 
-### Build and Run iOS Application
+```bash
+export ANTHROPIC_API_KEY="sk-..."
+./gradlew :composeApp:run
+```
 
-To build and run the development version of the iOS app, use the run configuration from the run widget
-in your IDE’s toolbar or open the [/iosApp](./iosApp) directory in Xcode and run it from there.
+## Профиль пользователя
 
----
+| Параметр | Описание                                         |
+|----------|--------------------------------------------------|
+| Deposit  | Сумма для инвестирования (USD/EUR/RUB)           |
+| Target   | Целевая доходность (% за N дней)                 |
+| Risk     | Консервативный / Умеренный / Агрессивный         |
+| Horizon  | Внутри дня / Краткосрок / Среднесрок / Долгосрок |
 
-Learn more about [Kotlin Multiplatform](https://www.jetbrains.com/help/kotlin-multiplatform-dev/get-started.html)…
+## Модель памяти
+
+```
+~/.aichallenge/
+├── chat_history.json      # История диалога
+├── working_memory.json    # Заметки (рабочая память)
+├── long_term_memory.json  # Профиль и настройки
+└── invariants.json        # Инварианты
+```
+
+### Три уровня
+
+1. **Short-term** — последние N сообщений диалога
+2. **Working** — заметки пользователя (Notes в UI)
+3. **Long-term** — профиль, решения, знания
+
+## Инварианты
+
+Правила, которые AI **не может нарушить**. Имеют приоритет над любым запросом.
+
+| Тип          | Описание                 | Пример                               |
+|--------------|--------------------------|--------------------------------------|
+| **MUST**     | Обязательное действие    | Всегда указывать stop-loss           |
+| **MUST_NOT** | Запрещённое действие     | Не рекомендовать мем-коины           |
+| **LIMIT**    | Числовое ограничение     | Максимум 30% депозита в одну позицию |
+
+Управление: кнопка **Rules** в заголовке приложения.
+
+## Task State Machine
+
+Детерминированный конечный автомат для структурированного выполнения задач.
+
+```
+IDLE → PLANNING → EXECUTING → VALIDATING → COMPLETED
+```
+
+Активируется по ключевым словам: `создай план`, `составь план`, `стратегию`, `пошаговый`
+
+## MCP Server
+
+В папке [project-catalog-mcp](./project-catalog-mcp) находится MCP сервер для интеграции с Claude Desktop.
+
+### Tools
+
+| Tool           | Описание                                    |
+|----------------|---------------------------------------------|
+| `project_info` | Информация о проекте: имя, тип, директории  |
+| `list_modules` | Список модулей из settings.gradle.kts       |
+| `list_screens` | Поиск Compose screens в проекте             |
+
+### Запуск
+
+```bash
+cd project-catalog-mcp
+./gradlew runListTools   # Проверка списка tools
+./gradlew runServer      # Запуск сервера (stdio)
+```
+
+### Интеграция с Claude Desktop
+
+Добавить в `claude_desktop_config.json`:
+
+```json
+{
+  "mcpServers": {
+    "project-catalog": {
+      "command": "/path/to/project-catalog-mcp/gradlew",
+      "args": ["--quiet", "runServer"],
+      "cwd": "/path/to/project-catalog-mcp"
+    }
+  }
+}
+```
+
+## Примеры запросов
+
+**Простые вопросы:**
+```
+Что такое стоп-лосс?
+Порекомендуй что купить
+```
+
+**Структурированные задачи:**
+```
+Создай инвестиционный план на неделю
+Составь план покупок на $500
+```
+
+**Тестирование инвариантов:**
+```
+Рекомендуй DOGE          → AI откажет (мем-коин)
+Вложи всё в Bitcoin      → AI откажет (> 30%)
+```
