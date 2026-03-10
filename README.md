@@ -1,48 +1,130 @@
-This is a Kotlin Multiplatform project targeting Android, iOS, Desktop (JVM).
+## Day 17: Первый инструмент MCP
 
-* [/composeApp](./composeApp/src) is for code that will be shared across your Compose Multiplatform applications.
-  It contains several subfolders:
-  - [commonMain](./composeApp/src/commonMain/kotlin) is for code that’s common for all targets.
-  - Other folders are for Kotlin code that will be compiled for only the platform indicated in the folder name.
-    For example, if you want to use Apple’s CoreCrypto for the iOS part of your Kotlin app,
-    the [iosMain](./composeApp/src/iosMain/kotlin) folder would be the right place for such calls.
-    Similarly, if you want to edit the Desktop (JVM) specific part, the [jvmMain](./composeApp/src/jvmMain/kotlin)
-    folder is the appropriate location.
+**Задание:** Реализовать MCP-сервер вокруг API, подключить к агенту, вызвать инструмент и получить результат.
 
-* [/iosApp](./iosApp/iosApp) contains iOS applications. Even if you’re sharing your UI with Compose Multiplatform,
-  you need this entry point for your iOS app. This is also where you should add SwiftUI code for your project.
+### Что сделано
 
-### Build and Run Android Application
+#### 1. MCP-сервер (`jsonplaceholder-mcp/`)
 
-To build and run the development version of the Android app, use the run configuration from the run widget
-in your IDE’s toolbar or build it directly from the terminal:
-- on macOS/Linux
-  ```shell
-  ./gradlew :composeApp:assembleDebug
-  ```
-- on Windows
-  ```shell
-  .\gradlew.bat :composeApp:assembleDebug
-  ```
+Реализован MCP server на Kotlin/JVM вокруг JSONPlaceholder API.
 
-### Build and Run Desktop (JVM) Application
+**Регистрация инструментов:**
 
-To build and run the development version of the desktop app, use the run configuration from the run widget
-in your IDE’s toolbar or run it directly from the terminal:
-- on macOS/Linux
-  ```shell
-  ./gradlew :composeApp:run
-  ```
-- on Windows
-  ```shell
-  .\gradlew.bat :composeApp:run
-  ```
+```kotlin
+server.addTool(
+    name = "get_post",
+    description = "Get a post by ID from JSONPlaceholder API",
+    inputSchema = Tool.Input(
+        properties = buildJsonObject {
+            put("id", buildJsonObject {
+                put("type", JsonPrimitive("integer"))
+                put("description", JsonPrimitive("The post ID to fetch"))
+            })
+        },
+        required = listOf("id")
+    )
+) { request ->
+    val id = request.arguments["id"]?.jsonPrimitive?.intOrNull
+    val post = JsonPlaceholderApi.getPost(id)
+    CallToolResult(content = listOf(TextContent(text = "Post #${post.id}...")))
+}
+```
 
-### Build and Run iOS Application
+**Зарегистрированные tools:**
 
-To build and run the development version of the iOS app, use the run configuration from the run widget
-in your IDE’s toolbar or open the [/iosApp](./iosApp) directory in Xcode and run it from there.
+| Tool       | Параметры  | Описание                        |
+|------------|------------|---------------------------------|
+| `get_post` | `id: Int`  | Получить пост по ID             |
+| `get_user` | `id: Int`  | Получить пользователя по ID     |
 
----
+#### 2. Агент с LLM (`composeApp/jvmMain/`)
 
-Learn more about [Kotlin Multiplatform](https://www.jetbrains.com/help/kotlin-multiplatform-dev/get-started.html)…
+**JsonPlaceholderAgent** — координирует взаимодействие:
+- Отправляет запрос пользователя в Claude (Anthropic API)
+- Получает `tool_use` от Claude с именем инструмента и аргументами
+- Вызывает MCP tool через JSON-RPC
+- Возвращает результат обратно Claude
+- Получает финальный ответ
+
+#### 3. Desktop UI
+
+Визуализация всего процесса:
+- **Execution Trace** — пошаговое выполнение
+- **Tool Call** — какой tool выбрал Claude и с какими аргументами
+- **Tool Result** — сырой результат от MCP server
+- **Final Response** — ответ Claude после обработки результата
+
+### Архитектура
+
+```
+┌─────────────────────────────────────────────────────────────────┐
+│  Desktop App                                                    │
+│  ┌──────────────────────────────────────────────────────────┐  │
+│  │  User: "Show me post 1"                                   │  │
+│  └──────────────────────────────────────────────────────────┘  │
+│                              ↓                                  │
+│  ┌──────────────────────────────────────────────────────────┐  │
+│  │  JsonPlaceholderAgent                                     │  │
+│  │  → Отправляет запрос в Claude API                         │  │
+│  │  ← Получает tool_use: get_post(id=1)                      │  │
+│  │  → Вызывает MCP tool                                      │  │
+│  │  ← Получает результат                                     │  │
+│  │  → Отправляет tool_result в Claude                        │  │
+│  │  ← Получает финальный ответ                               │  │
+│  └──────────────────────────────────────────────────────────┘  │
+│                              ↓                                  │
+│  ┌──────────────────────────────────────────────────────────┐  │
+│  │  MCP Server (subprocess)                                  │  │
+│  │  tools/call: get_post(id=1)                               │  │
+│  │  → HTTP GET jsonplaceholder.typicode.com/posts/1          │  │
+│  │  ← { userId: 1, title: "...", body: "..." }               │  │
+│  └──────────────────────────────────────────────────────────┘  │
+└─────────────────────────────────────────────────────────────────┘
+```
+
+### Запуск
+
+```bash
+# 1. Установить API ключ Anthropic
+export ANTHROPIC_API_KEY=sk-ant-...
+
+# 2. Собрать MCP server
+cd jsonplaceholder-mcp && ./gradlew build && cd ..
+
+# 3. Запустить desktop app
+./gradlew :composeApp:run
+```
+
+### Демо сценарий
+
+1. Нажать **Connect** — запускает MCP server как subprocess
+2. Ввести запрос: `Show me post 1`
+3. Нажать **Ask Claude**
+
+**Результат на UI:**
+
+```
+Execution Trace:
+  1. User Request: "Show me post 1"           ✓ Done
+  2. Sending to Claude                        ✓ Done
+  3. Claude Requested Tool: get_post          ✓ Done
+  4. Calling MCP Tool                         ✓ Done
+  5. Tool Result Received                     ✓ Done
+  6. Sending Result to Claude                 ✓ Done
+  7. Final Response Ready                     ✓ Done
+
+Tool Call:
+  Tool: get_post
+  Arguments: { "id": 1 }
+
+Tool Result (from MCP):
+  Post #1
+  User ID: 1
+  Title: sunt aut facere repellat provident...
+  Body: quia et suscipit suscipit recusandae...
+
+Final Response (Claude):
+  Here's post 1 from JSONPlaceholder:
+  Title: sunt aut facere repellat provident...
+  ...
+```
