@@ -1,48 +1,51 @@
-This is a Kotlin Multiplatform project targeting Android, iOS, Desktop (JVM).
+# AI Challenge - Day 18: Market Watcher MCP Demo
 
-* [/composeApp](./composeApp/src) is for code that will be shared across your Compose Multiplatform applications.
-  It contains several subfolders:
-  - [commonMain](./composeApp/src/commonMain/kotlin) is for code that’s common for all targets.
-  - Other folders are for Kotlin code that will be compiled for only the platform indicated in the folder name.
-    For example, if you want to use Apple’s CoreCrypto for the iOS part of your Kotlin app,
-    the [iosMain](./composeApp/src/iosMain/kotlin) folder would be the right place for such calls.
-    Similarly, if you want to edit the Desktop (JVM) specific part, the [jvmMain](./composeApp/src/jvmMain/kotlin)
-    folder is the appropriate location.
+Демо-проект MCP-инструмента с периодическим выполнением, SQLite хранилищем и LLM-агентом.
 
-* [/iosApp](./iosApp/iosApp) contains iOS applications. Even if you’re sharing your UI with Compose Multiplatform,
-  you need this entry point for your iOS app. This is also where you should add SwiftUI code for your project.
+## Что реализовано
 
-### Build and Run Android Application
+- **MCP Server** с background scheduler для сбора market data
+- **SQLite** хранилище для watch jobs и snapshots
+- **Binance API** для получения OHLC данных
+- **Claude API** для анализа и торговых рекомендаций
+- **Desktop UI** с real-time визуализацией
 
-To build and run the development version of the Android app, use the run configuration from the run widget
-in your IDE’s toolbar or build it directly from the terminal:
-- on macOS/Linux
-  ```shell
-  ./gradlew :composeApp:assembleDebug
-  ```
-- on Windows
-  ```shell
-  .\gradlew.bat :composeApp:assembleDebug
-  ```
+## Архитектура
 
-### Build and Run Desktop (JVM) Application
+```
+Desktop UI (Compose)
+    ↓
+MCP Client → MCP Server (subprocess)
+                ├── Scheduler (coroutines)
+                ├── MarketFetcher (Binance)
+                └── SQLite Storage
+    ↓
+Claude API → Trading Recommendations
+```
 
-To build and run the development version of the desktop app, use the run configuration from the run widget
-in your IDE’s toolbar or run it directly from the terminal:
-- on macOS/Linux
-  ```shell
-  ./gradlew :composeApp:run
-  ```
-- on Windows
-  ```shell
-  .\gradlew.bat :composeApp:run
-  ```
+## Быстрый старт
 
-### Build and Run iOS Application
+**1. Собрать MCP сервер:**
+```bash
+cd market-watcher-mcp
+../gradlew jar
+```
 
-To build and run the development version of the iOS app, use the run configuration from the run widget
-in your IDE’s toolbar or open the [/iosApp](./iosApp) directory in Xcode and run it from there.
+**2. Запустить desktop app:**
+```bash
+ANTHROPIC_API_KEY="sk-ant-..." ./gradlew :composeApp:run
+```
 
----
+**3. В UI:**
+- Нажать **Start All Watchers**
+- Смотреть как накапливаются snapshots и появляются рекомендации
+- Каждые 5 секунд новая рекомендация для разных криптовалют
 
-Learn more about [Kotlin Multiplatform](https://www.jetbrains.com/help/kotlin-multiplatform-dev/get-started.html)…
+## MCP Tools
+
+| Tool | Описание |
+|------|----------|
+| `start_market_watch` | Запустить watcher для символа |
+| `stop_market_watch` | Остановить watcher |
+| `get_market_summary` | Получить агрегированный summary |
+| `get_watch_status` | Статус watcher'а |
