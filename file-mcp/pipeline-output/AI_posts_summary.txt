@@ -1,0 +1,34 @@
+ОТЧЕТ: ПОИСК ПОСТОВ ПО ТЕМЕ "ИИ/AI"
+==========================================
+
+РЕЗУЛЬТАТЫ ПОИСКА:
+- Найдено постов: 8
+- Поисковый запрос: "AI"
+
+КРАТКОЕ РЕЗЮМЕ:
+=== Posts Summary ===
+Query: "AI"
+Total posts: 8
+
+Main themes: maiores, adipisci, suscipit, magni, quis
+
+Highlights:
+1. dolorem dolore est ipsam
+2. sint suscipit perspiciatis velit dolorum rerum ipsa laboriosam odio
+3. adipisci placeat illum aut reiciendis qui
+... and 5 more
+
+КЛЮЧЕВЫЕ СЛОВА:
+posts, adipisci, suscipit, summary, query, total, main, themes
+
+ДЕТАЛИ НАЙДЕННЫХ ПОСТОВ:
+1. ID: 8 - "dolorem dolore est ipsam"
+2. ID: 16 - "sint suscipit perspiciatis velit dolorum rerum ipsa laboriosam odio"  
+3. ID: 19 - "adipisci placeat illum aut reiciendis qui"
+4. ID: 28 - "delectus ullam et corporis nulla voluptas sequi"
+5. ID: 29 - "iusto eius quod necessitatibus culpa ea"
+6. ID: 31 - "ullam ut quidem id aut vel consequuntur"
+7. ID: 32 - "doloremque illum aliquid sunt"
+8. ID: 59 - "qui commodi dolor at maiores et quis id accusantium"
+
+Дата создания: автоматически сгенерировано

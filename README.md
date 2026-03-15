@@ -1,48 +1,102 @@
-This is a Kotlin Multiplatform project targeting Android, iOS, Desktop (JVM).
+# AI Challenge - Day 20: Multi-Server MCP Orchestration
 
-* [/composeApp](./composeApp/src) is for code that will be shared across your Compose Multiplatform applications.
-  It contains several subfolders:
-  - [commonMain](./composeApp/src/commonMain/kotlin) is for code that’s common for all targets.
-  - Other folders are for Kotlin code that will be compiled for only the platform indicated in the folder name.
-    For example, if you want to use Apple’s CoreCrypto for the iOS part of your Kotlin app,
-    the [iosMain](./composeApp/src/iosMain/kotlin) folder would be the right place for such calls.
-    Similarly, if you want to edit the Desktop (JVM) specific part, the [jvmMain](./composeApp/src/jvmMain/kotlin)
-    folder is the appropriate location.
+Демонстрация автоматической оркестрации инструментов с нескольких MCP серверов.
 
-* [/iosApp](./iosApp/iosApp) contains iOS applications. Even if you’re sharing your UI with Compose Multiplatform,
-  you need this entry point for your iOS app. This is also where you should add SwiftUI code for your project.
+## Концепция
 
-### Build and Run Android Application
+Claude как агент автоматически выбирает нужный инструмент с нужного сервера и выполняет сложный multi-step workflow по одному пользовательскому запросу.
 
-To build and run the development version of the Android app, use the run configuration from the run widget
-in your IDE’s toolbar or build it directly from the terminal:
-- on macOS/Linux
-  ```shell
-  ./gradlew :composeApp:assembleDebug
-  ```
-- on Windows
-  ```shell
-  .\gradlew.bat :composeApp:assembleDebug
-  ```
+```
+User Request
+      ↓
+Claude Agent (Anthropic API)
+      ↓
+┌────────────────────────────────────────────────────┐
+│            MCP Server Routing                       │
+├────────────────────────────────────────────────────┤
+│  search-mcp   →  search_posts                      │
+│  summary-mcp  →  summarize_posts, extract_keywords │
+│  file-mcp     →  save_to_file, read_file           │
+└────────────────────────────────────────────────────┘
+      ↓
+Final Response → UI
+```
 
-### Build and Run Desktop (JVM) Application
+## Быстрый старт
 
-To build and run the development version of the desktop app, use the run configuration from the run widget
-in your IDE’s toolbar or run it directly from the terminal:
-- on macOS/Linux
-  ```shell
-  ./gradlew :composeApp:run
-  ```
-- on Windows
-  ```shell
-  .\gradlew.bat :composeApp:run
-  ```
+```bash
+# 1. Собрать все MCP серверы
+cd search-mcp && ./gradlew jar && cd ..
+cd summary-mcp && ./gradlew jar && cd ..
+cd file-mcp && ./gradlew jar && cd ..
 
-### Build and Run iOS Application
+# 2. Установить API ключ
+export ANTHROPIC_API_KEY=sk-ant-...
 
-To build and run the development version of the iOS app, use the run configuration from the run widget
-in your IDE’s toolbar or open the [/iosApp](./iosApp) directory in Xcode and run it from there.
+# 3. Запустить desktop приложение
+./gradlew :composeApp:run
+```
 
----
+## Структура проекта
 
-Learn more about [Kotlin Multiplatform](https://www.jetbrains.com/help/kotlin-multiplatform-dev/get-started.html)…
+```
+AiChallenge/
+├── search-mcp/                    # MCP сервер: поиск постов
+│   └── src/main/kotlin/.../Main.kt
+│
+├── summary-mcp/                   # MCP сервер: суммаризация и keywords
+│   └── src/main/kotlin/.../Main.kt
+│
+├── file-mcp/                      # MCP сервер: работа с файлами
+│   └── src/main/kotlin/.../Main.kt
+│
+├── composeApp/
+│   └── src/jvmMain/kotlin/
+│       └── orchestration/
+│           ├── McpClient.kt       # Клиент для MCP stdio
+│           ├── McpRouter.kt       # Маршрутизация tool → server
+│           ├── OrchestrationAgent.kt  # Claude agent
+│           └── OrchestrationScreen.kt # Compose UI
+│
+└── pipeline-output/               # Сохраненные файлы
+```
+
+## MCP Серверы и инструменты
+
+### search-mcp
+- `search_posts(query)` — поиск постов в JSONPlaceholder по запросу
+
+### summary-mcp
+- `summarize_posts(postsJson)` — создание summary из JSON постов
+- `extract_keywords(text)` — извлечение ключевых слов из текста
+
+### file-mcp
+- `save_to_file(filename, content)` — сохранение в pipeline-output/
+- `read_file(filename)` — чтение из pipeline-output/
+
+## Пример запроса
+
+```
+Find posts about "qui", summarize the key themes, extract keywords,
+save the report to report.txt, and confirm what was saved.
+```
+
+## Что происходит
+
+1. Пользователь вводит запрос
+2. Claude анализирует и выбирает `search-mcp/search_posts`
+3. Получает результаты → выбирает `summary-mcp/summarize_posts`
+4. Создает summary → выбирает `summary-mcp/extract_keywords`
+5. Извлекает keywords → выбирает `file-mcp/save_to_file`
+6. Сохраняет файл → выбирает `file-mcp/read_file` для подтверждения
+7. Возвращает финальный ответ
+
+## Что показывает UI
+
+- Статус подключения к каждому MCP серверу (зеленые индикаторы)
+- Execution trace с именами серверов и инструментов
+- Preview результатов поиска
+- Preview summary
+- Извлеченные keywords
+- Путь к сохраненному файлу
+- Финальный ответ Claude
