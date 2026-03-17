@@ -1,0 +1,40 @@
+Application Architecture Overview
+
+This document describes the architecture of our mobile application.
+
+Layer Structure:
+1. Presentation Layer - Contains UI components and ViewModels
+2. Domain Layer - Contains business logic and use cases
+3. Data Layer - Contains repositories and data sources
+
+Presentation Layer:
+The presentation layer uses MVVM pattern. ViewModels expose UI state as StateFlow.
+Compose UI observes these states and renders the interface.
+User interactions trigger ViewModel methods which update the state.
+
+Domain Layer:
+Use cases encapsulate single business operations.
+They coordinate between multiple repositories when needed.
+All business rules are enforced at this layer.
+Use cases are independent of Android framework.
+
+Data Layer:
+Repositories abstract data sources from the rest of the app.
+They can combine data from multiple sources (API, database, cache).
+Data sources handle specific data operations.
+The repository pattern enables easy testing and data source swapping.
+
+Dependency Injection:
+We use Koin for dependency injection.
+Modules are organized by feature.
+ViewModels, use cases, and repositories are all injected.
+
+Error Handling:
+All operations return Result types.
+Errors are mapped to user-friendly messages in the presentation layer.
+Network errors trigger retry mechanisms.
+
+Testing Strategy:
+Unit tests for ViewModels and use cases.
+Integration tests for repositories.
+UI tests for critical user flows.
