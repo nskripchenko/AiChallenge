@@ -1,8 +1,6 @@
 package dev.skrip.aichallenge.rag
 
-import dev.skrip.aichallenge.model.Config
-import dev.skrip.aichallenge.model.DocumentIndex
-import dev.skrip.aichallenge.model.SearchResult
+import dev.skrip.aichallenge.model.*
 import dev.skrip.aichallenge.ollama.OllamaClient
 import dev.skrip.aichallenge.search.SemanticSearch
 
@@ -17,6 +15,74 @@ class RagService(
     private val search: SemanticSearch = SemanticSearch(),
     private val topK: Int = Config.TOP_K
 ) {
+    /**
+     * Ответ в режиме PLAIN - прямой запрос к LLM без retrieval
+     */
+    suspend fun askPlain(query: String): AnswerResult {
+        val startTime = System.currentTimeMillis()
+
+        val answer = ollamaClient.chatPlain(query)
+
+        return AnswerResult(
+            query = query,
+            mode = QuestionMode.PLAIN,
+            answer = answer,
+            sources = emptyList(),
+            durationMs = System.currentTimeMillis() - startTime
+        )
+    }
+
+    /**
+     * Ответ в режиме RAG - поиск + LLM
+     */
+    suspend fun askRag(query: String, index: DocumentIndex): AnswerResult {
+        val startTime = System.currentTimeMillis()
+
+        // 1. Get embedding for query
+        val queryEmbedding = ollamaClient.getEmbedding(query)
+
+        // 2. Search for relevant chunks
+        val searchResults = search.search(queryEmbedding, index, topK)
+
+        // 3. Build context from chunks
+        val context = buildContext(searchResults)
+
+        // 4. Generate answer
+        val answer = ollamaClient.chat(query, context)
+
+        // Convert to AnswerSource
+        val sources = searchResults.map { result ->
+            AnswerSource(
+                file = result.chunk.metadata.file,
+                section = result.chunk.metadata.section,
+                similarity = result.similarity,
+                textPreview = result.chunk.text.take(150) + "..."
+            )
+        }
+
+        return AnswerResult(
+            query = query,
+            mode = QuestionMode.RAG,
+            answer = answer,
+            sources = sources,
+            durationMs = System.currentTimeMillis() - startTime
+        )
+    }
+
+    /**
+     * Универсальный метод для обоих режимов
+     */
+    suspend fun ask(query: String, mode: QuestionMode, index: DocumentIndex?): AnswerResult {
+        return when (mode) {
+            QuestionMode.PLAIN -> askPlain(query)
+            QuestionMode.RAG -> {
+                requireNotNull(index) { "Index required for RAG mode" }
+                askRag(query, index)
+            }
+        }
+    }
+
+    // Legacy method for compatibility
     suspend fun ask(
         query: String,
         index: DocumentIndex

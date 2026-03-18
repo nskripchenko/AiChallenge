@@ -17,9 +17,12 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.viewmodel.compose.viewModel
+import dev.skrip.aichallenge.evaluation.EvaluationQuestions
 import dev.skrip.aichallenge.model.ChatMessage
 import dev.skrip.aichallenge.model.ChunkingStrategy
+import dev.skrip.aichallenge.model.EvaluationQuestion
 import dev.skrip.aichallenge.model.MessageRole
+import dev.skrip.aichallenge.model.QuestionMode
 import kotlinx.coroutines.launch
 
 @Composable
@@ -46,6 +49,7 @@ fun ChatScreen(
         TopBar(
             state = state,
             onStrategyChange = { viewModel.switchStrategy(it) },
+            onModeChange = { viewModel.switchQuestionMode(it) },
             onReindex = { viewModel.reindex() },
             onClear = { viewModel.clearMessages() }
         )
@@ -85,9 +89,12 @@ fun ChatScreen(
             }
         }
 
-        // Input area
+        // Input area - PLAIN mode doesn't require index
+        val inputEnabled = !state.isLoading && state.ollamaAvailable &&
+            (state.currentQuestionMode == QuestionMode.PLAIN || state.indexStatus != null)
+
         InputArea(
-            enabled = !state.isLoading && state.ollamaAvailable && state.indexStatus != null,
+            enabled = inputEnabled,
             onSend = { question ->
                 viewModel.ask(question)
                 coroutineScope.launch {
@@ -102,6 +109,7 @@ fun ChatScreen(
 private fun TopBar(
     state: ChatState,
     onStrategyChange: (ChunkingStrategy) -> Unit,
+    onModeChange: (QuestionMode) -> Unit,
     onReindex: () -> Unit,
     onClear: () -> Unit
 ) {
@@ -135,45 +143,75 @@ private fun TopBar(
 
             Spacer(modifier = Modifier.height(12.dp))
 
-            // Index status and controls
+            // Mode switcher (Plain vs RAG)
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.SpaceBetween,
                 verticalAlignment = Alignment.CenterVertically
             ) {
+                // Question mode
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    Text(
+                        text = "Mode:",
+                        style = MaterialTheme.typography.bodyMedium
+                    )
+                    ModeSwitch(
+                        currentMode = state.currentQuestionMode,
+                        onModeChange = onModeChange
+                    )
+                }
+
                 // Index info
-                Column {
-                    if (state.indexStatus?.isIndexing == true) {
-                        Text(
-                            text = state.indexStatus.indexingProgress ?: "Indexing...",
-                            style = MaterialTheme.typography.bodyMedium,
-                            color = MaterialTheme.colorScheme.primary
-                        )
-                    } else if (state.indexStatus != null) {
-                        Text(
-                            text = "${state.indexStatus.documentCount} docs, ${state.indexStatus.chunkCount} chunks",
-                            style = MaterialTheme.typography.bodyMedium
-                        )
-                    } else {
-                        Text(
-                            text = "No index loaded",
-                            style = MaterialTheme.typography.bodyMedium,
-                            color = MaterialTheme.colorScheme.error
-                        )
-                    }
+                if (state.indexStatus?.isIndexing == true) {
+                    Text(
+                        text = state.indexStatus.indexingProgress ?: "Indexing...",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.primary
+                    )
+                } else if (state.indexStatus != null) {
+                    Text(
+                        text = "${state.indexStatus.documentCount} docs, ${state.indexStatus.chunkCount} chunks",
+                        style = MaterialTheme.typography.bodySmall
+                    )
+                } else {
+                    Text(
+                        text = "No index",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.error
+                    )
+                }
+            }
+
+            Spacer(modifier = Modifier.height(8.dp))
+
+            // Controls row
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                // Strategy switcher (only for RAG mode)
+                if (state.currentQuestionMode == QuestionMode.RAG) {
+                    StrategySwitch(
+                        currentStrategy = state.currentStrategy,
+                        onStrategyChange = onStrategyChange,
+                        enabled = state.indexStatus?.isIndexing != true
+                    )
+                } else {
+                    Text(
+                        text = "Direct LLM (no retrieval)",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.5f)
+                    )
                 }
 
                 Row(
                     horizontalArrangement = Arrangement.spacedBy(8.dp),
                     verticalAlignment = Alignment.CenterVertically
                 ) {
-                    // Strategy switcher
-                    StrategySwitch(
-                        currentStrategy = state.currentStrategy,
-                        onStrategyChange = onStrategyChange,
-                        enabled = state.indexStatus?.isIndexing != true
-                    )
-
                     // Reindex button
                     Button(
                         onClick = onReindex,
@@ -191,6 +229,37 @@ private fun TopBar(
                     }
                 }
             }
+        }
+    }
+}
+
+@Composable
+private fun ModeSwitch(
+    currentMode: QuestionMode,
+    onModeChange: (QuestionMode) -> Unit
+) {
+    Row(
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(4.dp)
+    ) {
+        QuestionMode.entries.forEach { mode ->
+            val label = when (mode) {
+                QuestionMode.PLAIN -> "Plain"
+                QuestionMode.RAG -> "RAG"
+            }
+            val color = when (mode) {
+                QuestionMode.PLAIN -> Color(0xFFFF9800)
+                QuestionMode.RAG -> Color(0xFF4CAF50)
+            }
+            FilterChip(
+                selected = currentMode == mode,
+                onClick = { onModeChange(mode) },
+                label = { Text(label) },
+                colors = FilterChipDefaults.filterChipColors(
+                    selectedContainerColor = color.copy(alpha = 0.2f),
+                    selectedLabelColor = color
+                )
+            )
         }
     }
 }
@@ -377,52 +446,113 @@ private fun InputArea(
     onSend: (String) -> Unit
 ) {
     var text by remember { mutableStateOf("") }
+    var showEvalDropdown by remember { mutableStateOf(false) }
 
     Surface(
         modifier = Modifier.fillMaxWidth(),
         shadowElevation = 8.dp,
         color = MaterialTheme.colorScheme.surface
     ) {
-        Row(
-            modifier = Modifier
-                .padding(16.dp)
-                .fillMaxWidth(),
-            horizontalArrangement = Arrangement.spacedBy(12.dp),
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            OutlinedTextField(
-                value = text,
-                onValueChange = { text = it },
-                modifier = Modifier
-                    .weight(1f)
-                    .onKeyEvent { event ->
-                        if (event.key == Key.Enter && event.type == KeyEventType.KeyUp && !event.isShiftPressed) {
-                            if (text.isNotBlank() && enabled) {
-                                onSend(text.trim())
-                                text = ""
+        Column(modifier = Modifier.padding(16.dp)) {
+            // Evaluation questions dropdown
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Text(
+                    text = "Eval:",
+                    style = MaterialTheme.typography.labelMedium,
+                    color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f)
+                )
+
+                Box {
+                    OutlinedButton(
+                        onClick = { showEvalDropdown = true },
+                        enabled = enabled
+                    ) {
+                        Text("Pick test question")
+                    }
+
+                    DropdownMenu(
+                        expanded = showEvalDropdown,
+                        onDismissRequest = { showEvalDropdown = false }
+                    ) {
+                        EvaluationQuestions.questions.forEach { evalQuestion ->
+                            DropdownMenuItem(
+                                text = {
+                                    Column {
+                                        Text(
+                                            text = "#${evalQuestion.id}: ${evalQuestion.question}",
+                                            style = MaterialTheme.typography.bodySmall
+                                        )
+                                        Text(
+                                            text = "Expected: ${evalQuestion.expectation.take(50)}...",
+                                            style = MaterialTheme.typography.labelSmall,
+                                            color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.5f)
+                                        )
+                                    }
+                                },
+                                onClick = {
+                                    text = evalQuestion.question
+                                    showEvalDropdown = false
+                                }
+                            )
+                        }
+                    }
+                }
+
+                Spacer(modifier = Modifier.weight(1f))
+
+                Text(
+                    text = "Try same question in Plain & RAG modes to compare",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.4f)
+                )
+            }
+
+            Spacer(modifier = Modifier.height(8.dp))
+
+            // Input row
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(12.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                OutlinedTextField(
+                    value = text,
+                    onValueChange = { text = it },
+                    modifier = Modifier
+                        .weight(1f)
+                        .onKeyEvent { event ->
+                            if (event.key == Key.Enter && event.type == KeyEventType.KeyUp && !event.isShiftPressed) {
+                                if (text.isNotBlank() && enabled) {
+                                    onSend(text.trim())
+                                    text = ""
+                                }
+                                true
+                            } else {
+                                false
                             }
-                            true
-                        } else {
-                            false
+                        },
+                    placeholder = { Text("Ask a question...") },
+                    enabled = enabled,
+                    singleLine = true,
+                    shape = RoundedCornerShape(24.dp)
+                )
+
+                Button(
+                    onClick = {
+                        if (text.isNotBlank()) {
+                            onSend(text.trim())
+                            text = ""
                         }
                     },
-                placeholder = { Text("Ask a question about your documents...") },
-                enabled = enabled,
-                singleLine = true,
-                shape = RoundedCornerShape(24.dp)
-            )
-
-            Button(
-                onClick = {
-                    if (text.isNotBlank()) {
-                        onSend(text.trim())
-                        text = ""
-                    }
-                },
-                enabled = enabled && text.isNotBlank(),
-                shape = RoundedCornerShape(24.dp)
-            ) {
-                Text("Ask")
+                    enabled = enabled && text.isNotBlank(),
+                    shape = RoundedCornerShape(24.dp)
+                ) {
+                    Text("Ask")
+                }
             }
         }
     }

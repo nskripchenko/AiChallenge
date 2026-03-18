@@ -4,6 +4,7 @@ import dev.skrip.aichallenge.model.Config
 import io.ktor.client.*
 import io.ktor.client.call.*
 import io.ktor.client.engine.cio.*
+import io.ktor.client.plugins.*
 import io.ktor.client.plugins.contentnegotiation.*
 import io.ktor.client.request.*
 import io.ktor.client.statement.*
@@ -55,6 +56,11 @@ class OllamaClient(
         install(ContentNegotiation) {
             json(json)
         }
+        install(HttpTimeout) {
+            requestTimeoutMillis = 120_000  // 2 minutes for LLM responses
+            connectTimeoutMillis = 10_000   // 10 seconds to connect
+            socketTimeoutMillis = 120_000   // 2 minutes for socket
+        }
     }
 
     suspend fun getEmbedding(text: String): List<Float> {
@@ -100,6 +106,43 @@ class OllamaClient(
 
         // Ollama returns ndjson - multiple JSON lines with partial content
         // Concatenate all message.content parts
+        val responseText = response.bodyAsText()
+        val lines = responseText.trim().lines().filter { it.isNotBlank() }
+
+        val fullContent = StringBuilder()
+        for (line in lines) {
+            try {
+                val part = json.decodeFromString<ChatResponse>(line)
+                fullContent.append(part.message.content)
+            } catch (e: Exception) {
+                // Skip malformed lines
+            }
+        }
+
+        return fullContent.toString()
+    }
+
+    /**
+     * Прямой запрос к LLM без контекста (режим PLAIN)
+     */
+    suspend fun chatPlain(userMessage: String): String {
+        val messages = listOf(
+            ChatMessage(
+                role = "system",
+                content = "You are a helpful assistant. Answer questions concisely and directly."
+            ),
+            ChatMessage(role = "user", content = userMessage)
+        )
+
+        val response = client.post("$baseUrl/api/chat") {
+            contentType(ContentType.Application.Json)
+            setBody(ChatRequest(
+                model = chatModel,
+                messages = messages,
+                stream = false
+            ))
+        }
+
         val responseText = response.bodyAsText()
         val lines = responseText.trim().lines().filter { it.isNotBlank() }
 

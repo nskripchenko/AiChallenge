@@ -18,6 +18,7 @@ data class ChatState(
     val messages: List<ChatMessage> = emptyList(),
     val isLoading: Boolean = false,
     val currentStrategy: ChunkingStrategy = ChunkingStrategy.STRUCTURED,
+    val currentQuestionMode: QuestionMode = QuestionMode.RAG,
     val indexStatus: IndexStatus? = null,
     val ollamaAvailable: Boolean = false,
     val error: String? = null
@@ -78,6 +79,10 @@ class ChatViewModel : ViewModel() {
         loadIndex(strategy)
     }
 
+    fun switchQuestionMode(mode: QuestionMode) {
+        _state.value = _state.value.copy(currentQuestionMode = mode)
+    }
+
     fun reindex() {
         viewModelScope.launch {
             val strategy = _state.value.currentStrategy
@@ -134,17 +139,21 @@ class ChatViewModel : ViewModel() {
     fun ask(question: String) {
         if (question.isBlank()) return
 
+        val mode = _state.value.currentQuestionMode
         val index = currentIndex
-        if (index == null) {
+
+        // RAG mode requires index
+        if (mode == QuestionMode.RAG && index == null) {
             _state.value = _state.value.copy(error = "No index available. Please reindex first.")
             return
         }
 
-        // Add user message
+        // Add user message with mode indicator
+        val modeLabel = if (mode == QuestionMode.PLAIN) "[Plain]" else "[RAG]"
         val userMessage = ChatMessage(
             id = UUID.randomUUID().toString(),
             role = MessageRole.USER,
-            content = question
+            content = "$modeLabel $question"
         )
 
         _state.value = _state.value.copy(
@@ -155,13 +164,34 @@ class ChatViewModel : ViewModel() {
 
         viewModelScope.launch {
             try {
-                val response = ragService.ask(question, index)
+                val result = ragService.ask(question, mode, index)
 
+                // Convert AnswerSource to SearchResult for compatibility
+                val searchResults = result.sources.map { source ->
+                    SearchResult(
+                        chunk = Chunk(
+                            id = "",
+                            text = source.textPreview,
+                            metadata = ChunkMetadata(
+                                source = source.file,
+                                file = source.file,
+                                title = null,
+                                section = source.section,
+                                strategy = _state.value.currentStrategy,
+                                startOffset = 0,
+                                endOffset = 0
+                            )
+                        ),
+                        similarity = source.similarity
+                    )
+                }
+
+                val durationInfo = "(${result.durationMs}ms)"
                 val assistantMessage = ChatMessage(
                     id = UUID.randomUUID().toString(),
                     role = MessageRole.ASSISTANT,
-                    content = response.answer,
-                    sources = response.sources
+                    content = "${result.answer}\n\n$modeLabel $durationInfo",
+                    sources = searchResults
                 )
 
                 _state.value = _state.value.copy(
