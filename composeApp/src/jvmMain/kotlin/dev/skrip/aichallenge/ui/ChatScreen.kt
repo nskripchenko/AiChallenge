@@ -10,7 +10,6 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.input.key.*
 import androidx.compose.ui.text.font.FontWeight
@@ -20,9 +19,9 @@ import androidx.lifecycle.viewmodel.compose.viewModel
 import dev.skrip.aichallenge.evaluation.EvaluationQuestions
 import dev.skrip.aichallenge.model.ChatMessage
 import dev.skrip.aichallenge.model.ChunkingStrategy
-import dev.skrip.aichallenge.model.EvaluationQuestion
 import dev.skrip.aichallenge.model.MessageRole
 import dev.skrip.aichallenge.model.QuestionMode
+import dev.skrip.aichallenge.model.RetrievalMode
 import kotlinx.coroutines.launch
 
 @Composable
@@ -50,6 +49,7 @@ fun ChatScreen(
             state = state,
             onStrategyChange = { viewModel.switchStrategy(it) },
             onModeChange = { viewModel.switchQuestionMode(it) },
+            onRetrievalModeChange = { viewModel.switchRetrievalMode(it) },
             onReindex = { viewModel.reindex() },
             onClear = { viewModel.clearMessages() }
         )
@@ -110,6 +110,7 @@ private fun TopBar(
     state: ChatState,
     onStrategyChange: (ChunkingStrategy) -> Unit,
     onModeChange: (QuestionMode) -> Unit,
+    onRetrievalModeChange: (RetrievalMode) -> Unit,
     onReindex: () -> Unit,
     onClear: () -> Unit
 ) {
@@ -121,19 +122,19 @@ private fun TopBar(
         Column(
             modifier = Modifier.padding(16.dp)
         ) {
+            // Title row
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.SpaceBetween,
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 Text(
-                    text = "RAG Demo",
+                    text = "RAG Demo - Day 23",
                     style = MaterialTheme.typography.headlineSmall,
                     fontWeight = FontWeight.Bold
                 )
 
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    // Ollama status
                     StatusChip(
                         label = if (state.ollamaAvailable) "Ollama OK" else "Ollama Offline",
                         color = if (state.ollamaAvailable) Color(0xFF4CAF50) else Color(0xFFF44336)
@@ -143,13 +144,12 @@ private fun TopBar(
 
             Spacer(modifier = Modifier.height(12.dp))
 
-            // Mode switcher (Plain vs RAG)
+            // Mode switcher row (Plain vs RAG)
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.SpaceBetween,
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                // Question mode
                 Row(
                     verticalAlignment = Alignment.CenterVertically,
                     horizontalArrangement = Arrangement.spacedBy(8.dp)
@@ -185,47 +185,106 @@ private fun TopBar(
                 }
             }
 
-            Spacer(modifier = Modifier.height(8.dp))
+            // RAG-specific controls
+            if (state.currentQuestionMode == QuestionMode.RAG) {
+                Spacer(modifier = Modifier.height(8.dp))
 
-            // Controls row
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                // Strategy switcher (only for RAG mode)
-                if (state.currentQuestionMode == QuestionMode.RAG) {
-                    StrategySwitch(
-                        currentStrategy = state.currentStrategy,
-                        onStrategyChange = onStrategyChange,
-                        enabled = state.indexStatus?.isIndexing != true
-                    )
-                } else {
+                // Retrieval mode row
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        Text(
+                            text = "Retrieval:",
+                            style = MaterialTheme.typography.bodyMedium
+                        )
+                        RetrievalModeSwitch(
+                            currentMode = state.currentRetrievalMode,
+                            onModeChange = onRetrievalModeChange,
+                            enabled = state.indexStatus?.isIndexing != true
+                        )
+                    }
+                }
+
+                Spacer(modifier = Modifier.height(8.dp))
+
+                // Strategy and buttons row
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        Text(
+                            text = "Chunking:",
+                            style = MaterialTheme.typography.bodyMedium
+                        )
+                        StrategySwitch(
+                            currentStrategy = state.currentStrategy,
+                            onStrategyChange = onStrategyChange,
+                            enabled = state.indexStatus?.isIndexing != true
+                        )
+                    }
+
+                    Row(
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Button(
+                            onClick = onReindex,
+                            enabled = state.ollamaAvailable && state.indexStatus?.isIndexing != true,
+                            colors = ButtonDefaults.buttonColors(
+                                containerColor = MaterialTheme.colorScheme.secondary
+                            )
+                        ) {
+                            Text("Reindex")
+                        }
+
+                        OutlinedButton(onClick = onClear) {
+                            Text("Clear")
+                        }
+                    }
+                }
+            } else {
+                // Plain mode - just show buttons
+                Spacer(modifier = Modifier.height(8.dp))
+
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
                     Text(
                         text = "Direct LLM (no retrieval)",
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.5f)
                     )
-                }
 
-                Row(
-                    horizontalArrangement = Arrangement.spacedBy(8.dp),
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    // Reindex button
-                    Button(
-                        onClick = onReindex,
-                        enabled = state.ollamaAvailable && state.indexStatus?.isIndexing != true,
-                        colors = ButtonDefaults.buttonColors(
-                            containerColor = MaterialTheme.colorScheme.secondary
-                        )
+                    Row(
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        verticalAlignment = Alignment.CenterVertically
                     ) {
-                        Text("Reindex")
-                    }
+                        Button(
+                            onClick = onReindex,
+                            enabled = state.ollamaAvailable && state.indexStatus?.isIndexing != true,
+                            colors = ButtonDefaults.buttonColors(
+                                containerColor = MaterialTheme.colorScheme.secondary
+                            )
+                        ) {
+                            Text("Reindex")
+                        }
 
-                    // Clear button
-                    OutlinedButton(onClick = onClear) {
-                        Text("Clear")
+                        OutlinedButton(onClick = onClear) {
+                            Text("Clear")
+                        }
                     }
                 }
             }
@@ -265,6 +324,41 @@ private fun ModeSwitch(
 }
 
 @Composable
+private fun RetrievalModeSwitch(
+    currentMode: RetrievalMode,
+    onModeChange: (RetrievalMode) -> Unit,
+    enabled: Boolean
+) {
+    Row(
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(4.dp)
+    ) {
+        RetrievalMode.entries.forEach { mode ->
+            val label = when (mode) {
+                RetrievalMode.BASELINE -> "Baseline"
+                RetrievalMode.FILTERED -> "Filtered"
+                RetrievalMode.REWRITE_FILTERED -> "Rewrite"
+            }
+            val color = when (mode) {
+                RetrievalMode.BASELINE -> Color(0xFF9E9E9E)
+                RetrievalMode.FILTERED -> Color(0xFF2196F3)
+                RetrievalMode.REWRITE_FILTERED -> Color(0xFF9C27B0)
+            }
+            FilterChip(
+                selected = currentMode == mode,
+                onClick = { onModeChange(mode) },
+                label = { Text(label, fontSize = 12.sp) },
+                enabled = enabled,
+                colors = FilterChipDefaults.filterChipColors(
+                    selectedContainerColor = color.copy(alpha = 0.2f),
+                    selectedLabelColor = color
+                )
+            )
+        }
+    }
+}
+
+@Composable
 private fun StrategySwitch(
     currentStrategy: ChunkingStrategy,
     onStrategyChange: (ChunkingStrategy) -> Unit,
@@ -278,7 +372,7 @@ private fun StrategySwitch(
             FilterChip(
                 selected = currentStrategy == strategy,
                 onClick = { onStrategyChange(strategy) },
-                label = { Text(strategy.name.lowercase().replaceFirstChar { it.uppercase() }) },
+                label = { Text(strategy.name.lowercase().replaceFirstChar { it.uppercase() }, fontSize = 12.sp) },
                 enabled = enabled
             )
         }
@@ -340,7 +434,7 @@ private fun EmptyState(ollamaAvailable: Boolean) {
         Spacer(modifier = Modifier.height(8.dp))
         Text(
             text = if (ollamaAvailable) {
-                "Ask questions about your documents.\nClick 'Reindex' to build the search index."
+                "Ask questions about your documents.\nClick 'Reindex' to build the search index.\n\nDay 23: Compare Baseline vs Filtered vs Rewrite modes!"
             } else {
                 "Please start Ollama to use this demo:\nollama serve"
             },
@@ -505,7 +599,7 @@ private fun InputArea(
                 Spacer(modifier = Modifier.weight(1f))
 
                 Text(
-                    text = "Try same question in Plain & RAG modes to compare",
+                    text = "Compare: Baseline → Filtered → Rewrite",
                     style = MaterialTheme.typography.labelSmall,
                     color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.4f)
                 )

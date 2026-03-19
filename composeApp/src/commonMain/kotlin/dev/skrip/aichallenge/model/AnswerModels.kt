@@ -28,7 +28,11 @@ data class AnswerResult(
     val mode: QuestionMode,
     val answer: String,
     val sources: List<AnswerSource> = emptyList(),
-    val durationMs: Long = 0
+    val durationMs: Long = 0,
+    /** Режим retrieval (только для RAG) */
+    val retrievalMode: RetrievalMode? = null,
+    /** Статистика retrieval (только для RAG) */
+    val retrievalStats: RetrievalStats? = null
 )
 
 /**

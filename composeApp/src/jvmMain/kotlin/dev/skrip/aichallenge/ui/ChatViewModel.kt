@@ -19,6 +19,7 @@ data class ChatState(
     val isLoading: Boolean = false,
     val currentStrategy: ChunkingStrategy = ChunkingStrategy.STRUCTURED,
     val currentQuestionMode: QuestionMode = QuestionMode.RAG,
+    val currentRetrievalMode: RetrievalMode = RetrievalMode.BASELINE,
     val indexStatus: IndexStatus? = null,
     val ollamaAvailable: Boolean = false,
     val error: String? = null
@@ -83,6 +84,10 @@ class ChatViewModel : ViewModel() {
         _state.value = _state.value.copy(currentQuestionMode = mode)
     }
 
+    fun switchRetrievalMode(mode: RetrievalMode) {
+        _state.value = _state.value.copy(currentRetrievalMode = mode)
+    }
+
     fun reindex() {
         viewModelScope.launch {
             val strategy = _state.value.currentStrategy
@@ -140,6 +145,7 @@ class ChatViewModel : ViewModel() {
         if (question.isBlank()) return
 
         val mode = _state.value.currentQuestionMode
+        val retrievalMode = _state.value.currentRetrievalMode
         val index = currentIndex
 
         // RAG mode requires index
@@ -148,8 +154,8 @@ class ChatViewModel : ViewModel() {
             return
         }
 
-        // Add user message with mode indicator
-        val modeLabel = if (mode == QuestionMode.PLAIN) "[Plain]" else "[RAG]"
+        // Build mode label
+        val modeLabel = buildModeLabel(mode, retrievalMode)
         val userMessage = ChatMessage(
             id = UUID.randomUUID().toString(),
             role = MessageRole.USER,
@@ -164,7 +170,7 @@ class ChatViewModel : ViewModel() {
 
         viewModelScope.launch {
             try {
-                val result = ragService.ask(question, mode, index)
+                val result = ragService.ask(question, mode, index, retrievalMode)
 
                 // Convert AnswerSource to SearchResult for compatibility
                 val searchResults = result.sources.map { source ->
@@ -186,11 +192,13 @@ class ChatViewModel : ViewModel() {
                     )
                 }
 
-                val durationInfo = "(${result.durationMs}ms)"
+                // Build response info with retrieval stats
+                val responseInfo = buildResponseInfo(result, modeLabel)
+
                 val assistantMessage = ChatMessage(
                     id = UUID.randomUUID().toString(),
                     role = MessageRole.ASSISTANT,
-                    content = "${result.answer}\n\n$modeLabel $durationInfo",
+                    content = "${result.answer}\n\n$responseInfo",
                     sources = searchResults
                 )
 
@@ -204,6 +212,37 @@ class ChatViewModel : ViewModel() {
                     error = "Failed to get answer: ${e.message}"
                 )
             }
+        }
+    }
+
+    private fun buildModeLabel(mode: QuestionMode, retrievalMode: RetrievalMode): String {
+        return when (mode) {
+            QuestionMode.PLAIN -> "[Plain]"
+            QuestionMode.RAG -> {
+                val retrievalLabel = when (retrievalMode) {
+                    RetrievalMode.BASELINE -> "Baseline"
+                    RetrievalMode.FILTERED -> "Filtered"
+                    RetrievalMode.REWRITE_FILTERED -> "Rewrite"
+                }
+                "[RAG:$retrievalLabel]"
+            }
+        }
+    }
+
+    private fun buildResponseInfo(result: AnswerResult, modeLabel: String): String {
+        val stats = result.retrievalStats
+        return if (stats != null) {
+            buildString {
+                append("$modeLabel (${result.durationMs}ms)")
+                append(" | Retrieved: ${stats.rawRetrievedCount}")
+                append(" → Filtered: ${stats.afterFilteringCount}")
+                append(" → Used: ${stats.finalUsedCount}")
+                if (stats.rewrittenQuery != null) {
+                    append("\nQuery rewritten: \"${stats.rewrittenQuery}\"")
+                }
+            }
+        } else {
+            "$modeLabel (${result.durationMs}ms)"
         }
     }
 

@@ -1,6 +1,6 @@
 # RAG Demo - Document Indexing
 
-## День 21-22: RAG Pipeline с режимом сравнения
+## День 21-23: RAG Pipeline с реранкингом и фильтрацией
 
 ## Что делает приложение
 
@@ -9,8 +9,9 @@
 3. Генерирует embeddings через локальный Ollama
 4. Сохраняет индекс в JSON
 5. Выполняет semantic search по вопросу
-6. Генерирует ответ через LLM на основе найденного контекста
-7. **NEW:** Сравнение режимов Plain vs RAG с тестовыми вопросами
+6. **Day 23:** Фильтрация и реранкинг retrieved chunks
+7. **Day 23:** Query rewriting для улучшения поиска
+8. Генерирует ответ через LLM на основе найденного контекста
 
 ## Режимы работы
 
@@ -18,6 +19,20 @@
 |-----------|----------------------------------------------|
 | **Plain** | Прямой запрос к LLM без контекста (baseline) |
 | **RAG**   | Retrieval-Augmented Generation: поиск + LLM  |
+
+## Режимы Retrieval (Day 23)
+
+| Режим        | Pipeline                                               |
+|--------------|--------------------------------------------------------|
+| **Baseline** | query → search(top-3) → LLM                            |
+| **Filtered** | query → search(top-10) → filter → rerank → top-3 → LLM |
+| **Rewrite**  | query → **rewrite** → search → filter → rerank → LLM   |
+
+### Что делает каждый этап:
+
+- **Query Rewrite**: Переписывает вопрос в оптимизированный retrieval query
+- **Filtering**: Удаляет chunks с низким similarity, короткие тексты, дубликаты
+- **Reranking**: Комбинирует semantic similarity + keyword overlap
 
 ## Быстрый старт
 
@@ -45,9 +60,25 @@ ollama pull llama3.2           # chat
 
 1. Нажать **Reindex** для построения индекса
 2. Выбрать режим: **Plain** или **RAG**
-3. Выбрать стратегию chunking: **Fixed** или **Structured** (для RAG)
-4. Использовать **Eval dropdown** для выбора тестового вопроса
-5. Сравнить ответы в разных режимах
+3. Выбрать **Retrieval mode**: Baseline / Filtered / Rewrite
+4. Выбрать стратегию chunking: **Fixed** или **Structured**
+5. Использовать **Eval dropdown** для выбора тестового вопроса
+6. Сравнить ответы и статистику retrieval
+
+## Retrieval Stats
+
+В режиме RAG показывается статистика:
+
+```
+[RAG:Filtered] (1234ms) | Retrieved: 10 → Filtered: 5 → Used: 3
+Query rewritten: "coroutine kotlin lightweight async"
+```
+
+| Метрика   | Описание                               |
+|-----------|----------------------------------------|
+| Retrieved | Сколько chunks найдено semantic search |
+| Filtered  | Сколько осталось после фильтрации      |
+| Used      | Сколько использовано в контексте LLM   |
 
 ## Evaluation Questions
 
@@ -78,7 +109,7 @@ ollama pull llama3.2           # chat
 ```
 composeApp/src/
 ├── commonMain/kotlin/dev/skrip/aichallenge/
-│   ├── model/           # Document, Chunk, IndexEntry, Config, AnswerModels
+│   ├── model/           # Document, Chunk, IndexEntry, RetrievalModels
 │   ├── chunking/        # FixedSizeChunker, StructuredChunker
 │   └── search/          # SemanticSearch (cosine similarity)
 ├── jvmMain/kotlin/dev/skrip/aichallenge/
@@ -86,6 +117,8 @@ composeApp/src/
 │   ├── ollama/          # OllamaClient (embeddings + chat)
 │   ├── index/           # IndexStorage, IndexBuilder
 │   ├── rag/             # RagService (Plain + RAG modes)
+│   ├── retrieval/       # Day 23: QueryRewriter, ChunkFilter,
+│   │                    #         HeuristicReranker, ImprovedRetrieval
 │   ├── evaluation/      # EvaluationQuestions
 │   └── ui/              # ChatScreen, ChatViewModel
 └── docs/                # Тестовые документы
@@ -93,7 +126,7 @@ composeApp/src/
 
 ## Конфигурация
 
-Файл `model/Config.kt`:
+### model/Config.kt
 
 ```kotlin
 object Config {
@@ -106,27 +139,50 @@ object Config {
 }
 ```
 
-## Архитектура RAG Pipeline
+## Архитектура Improved Retrieval Pipeline (Day 23)
 
 ```
 ┌─────────────────────────────────────────────────────────────┐
 │                        User Question                         │
 └─────────────────────────────────────────────────────────────┘
                               │
-              ┌───────────────┴───────────────┐
-              ▼                               ▼
-┌─────────────────────────┐     ┌─────────────────────────────┐
-│      PLAIN Mode         │     │         RAG Mode            │
-│  Direct LLM Query       │     │                             │
-└─────────────────────────┘     │  1. Embed query             │
-              │                 │  2. Semantic search         │
-              │                 │  3. Build context           │
-              │                 │  4. LLM + context           │
-              │                 └─────────────────────────────┘
-              │                               │
-              └───────────────┬───────────────┘
+        ┌─────────────────────┼─────────────────────┐
+        ▼                     ▼                     ▼
+   ┌─────────┐          ┌──────────┐         ┌──────────┐
+   │ BASELINE│          │ FILTERED │         │ REWRITE  │
+   └─────────┘          └──────────┘         └──────────┘
+        │                     │                     │
+        │                     │              ┌──────▼──────┐
+        │                     │              │QueryRewriter│
+        │                     │              │  (Ollama)   │
+        │                     │              └──────┬──────┘
+        │                     │                     │
+        ▼                     ▼                     ▼
+   ┌─────────────────────────────────────────────────────┐
+   │              Semantic Search (top-K)                 │
+   │         Baseline: top-3 | Filtered/Rewrite: top-10  │
+   └─────────────────────────────────────────────────────┘
+        │                     │                     │
+        │              ┌──────▼──────┐       ┌──────▼──────┐
+        │              │ ChunkFilter │       │ ChunkFilter │
+        │              │ - threshold │       │ - threshold │
+        │              │ - minLength │       │ - minLength │
+        │              │ - dedup     │       │ - dedup     │
+        │              └──────┬──────┘       └──────┬──────┘
+        │                     │                     │
+        │              ┌──────▼──────┐       ┌──────▼──────┐
+        │              │  Reranker   │       │  Reranker   │
+        │              │ semantic +  │       │ semantic +  │
+        │              │ keywords    │       │ keywords    │
+        │              └──────┬──────┘       └──────┬──────┘
+        │                     │                     │
+        ▼                     ▼                     ▼
+   ┌─────────────────────────────────────────────────────┐
+   │                 Final top-K chunks                   │
+   └─────────────────────────────────────────────────────┘
+                              │
                               ▼
-┌─────────────────────────────────────────────────────────────┐
-│                    Answer + Sources (RAG)                    │
-└─────────────────────────────────────────────────────────────┘
+   ┌─────────────────────────────────────────────────────┐
+   │              Build Context + LLM Answer              │
+   └─────────────────────────────────────────────────────┘
 ```

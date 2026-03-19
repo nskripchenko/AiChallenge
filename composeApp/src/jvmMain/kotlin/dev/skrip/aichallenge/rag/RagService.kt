@@ -2,6 +2,7 @@ package dev.skrip.aichallenge.rag
 
 import dev.skrip.aichallenge.model.*
 import dev.skrip.aichallenge.ollama.OllamaClient
+import dev.skrip.aichallenge.retrieval.ImprovedRetrieval
 import dev.skrip.aichallenge.search.SemanticSearch
 
 data class RagResponse(
@@ -13,8 +14,10 @@ data class RagResponse(
 class RagService(
     private val ollamaClient: OllamaClient = OllamaClient(),
     private val search: SemanticSearch = SemanticSearch(),
-    private val topK: Int = Config.TOP_K
+    private val config: RetrievalConfig = RetrievalConfig()
 ) {
+    private val improvedRetrieval = ImprovedRetrieval(ollamaClient, search, config)
+
     /**
      * Ответ в режиме PLAIN - прямой запрос к LLM без retrieval
      */
@@ -33,29 +36,30 @@ class RagService(
     }
 
     /**
-     * Ответ в режиме RAG - поиск + LLM
+     * Ответ в режиме RAG с improved retrieval pipeline
      */
-    suspend fun askRag(query: String, index: DocumentIndex): AnswerResult {
+    suspend fun askRag(
+        query: String,
+        index: DocumentIndex,
+        retrievalMode: RetrievalMode = RetrievalMode.BASELINE
+    ): AnswerResult {
         val startTime = System.currentTimeMillis()
 
-        // 1. Get embedding for query
-        val queryEmbedding = ollamaClient.getEmbedding(query)
+        // 1. Improved retrieval
+        val retrievalResult = improvedRetrieval.retrieve(query, index, retrievalMode)
 
-        // 2. Search for relevant chunks
-        val searchResults = search.search(queryEmbedding, index, topK)
+        // 2. Build context from retrieved chunks
+        val context = buildContextFromEnhanced(retrievalResult.results)
 
-        // 3. Build context from chunks
-        val context = buildContext(searchResults)
-
-        // 4. Generate answer
+        // 3. Generate answer
         val answer = ollamaClient.chat(query, context)
 
-        // Convert to AnswerSource
-        val sources = searchResults.map { result ->
+        // 4. Convert to AnswerSource
+        val sources = retrievalResult.results.map { result ->
             AnswerSource(
                 file = result.chunk.metadata.file,
                 section = result.chunk.metadata.section,
-                similarity = result.similarity,
+                similarity = result.combinedScore,
                 textPreview = result.chunk.text.take(150) + "..."
             )
         }
@@ -65,47 +69,52 @@ class RagService(
             mode = QuestionMode.RAG,
             answer = answer,
             sources = sources,
-            durationMs = System.currentTimeMillis() - startTime
+            durationMs = System.currentTimeMillis() - startTime,
+            retrievalMode = retrievalMode,
+            retrievalStats = retrievalResult.stats
         )
     }
 
     /**
-     * Универсальный метод для обоих режимов
+     * Универсальный метод для всех режимов
      */
-    suspend fun ask(query: String, mode: QuestionMode, index: DocumentIndex?): AnswerResult {
+    suspend fun ask(
+        query: String,
+        mode: QuestionMode,
+        index: DocumentIndex?,
+        retrievalMode: RetrievalMode = RetrievalMode.BASELINE
+    ): AnswerResult {
         return when (mode) {
             QuestionMode.PLAIN -> askPlain(query)
             QuestionMode.RAG -> {
                 requireNotNull(index) { "Index required for RAG mode" }
-                askRag(query, index)
+                askRag(query, index, retrievalMode)
             }
         }
     }
 
-    // Legacy method for compatibility
-    suspend fun ask(
-        query: String,
-        index: DocumentIndex
-    ): RagResponse {
-        // 1. Get embedding for query
-        val queryEmbedding = ollamaClient.getEmbedding(query)
-
-        // 2. Search for relevant chunks
-        val searchResults = search.search(queryEmbedding, index, topK)
-
-        // 3. Build context from chunks
-        val context = buildContext(searchResults)
-
-        // 4. Generate answer
-        val answer = ollamaClient.chat(query, context)
-
-        return RagResponse(
-            answer = answer,
-            sources = searchResults,
-            query = query
-        )
+    // Legacy method for compatibility (без retrievalMode)
+    suspend fun ask(query: String, mode: QuestionMode, index: DocumentIndex?): AnswerResult {
+        return ask(query, mode, index, RetrievalMode.BASELINE)
     }
 
+    private fun buildContextFromEnhanced(results: List<EnhancedSearchResult>): String {
+        if (results.isEmpty()) return "No relevant information found."
+
+        return buildString {
+            appendLine("Relevant information from documents:")
+            appendLine()
+
+            results.forEachIndexed { index, result ->
+                val section = result.chunk.metadata.section ?: "unknown section"
+                appendLine("--- Source ${index + 1}: ${result.chunk.metadata.file} ($section) ---")
+                appendLine(result.chunk.text)
+                appendLine()
+            }
+        }
+    }
+
+    // Legacy methods for backwards compatibility
     private fun buildContext(results: List<SearchResult>): String {
         if (results.isEmpty()) return "No relevant information found."
 
@@ -121,9 +130,22 @@ class RagService(
         }
     }
 
-    /**
-     * Ask with mock search results (for testing without Ollama embeddings)
-     */
+    suspend fun ask(
+        query: String,
+        index: DocumentIndex
+    ): RagResponse {
+        val queryEmbedding = ollamaClient.getEmbedding(query)
+        val searchResults = search.search(queryEmbedding, index, config.topKAfterFiltering)
+        val context = buildContext(searchResults)
+        val answer = ollamaClient.chat(query, context)
+
+        return RagResponse(
+            answer = answer,
+            sources = searchResults,
+            query = query
+        )
+    }
+
     suspend fun askWithProvidedContext(
         query: String,
         searchResults: List<SearchResult>
