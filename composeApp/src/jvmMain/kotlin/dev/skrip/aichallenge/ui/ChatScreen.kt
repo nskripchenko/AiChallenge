@@ -17,6 +17,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.viewmodel.compose.viewModel
 import dev.skrip.aichallenge.evaluation.EvaluationQuestions
+import dev.skrip.aichallenge.model.AnswerQuote
 import dev.skrip.aichallenge.model.ChatMessage
 import dev.skrip.aichallenge.model.ChunkingStrategy
 import dev.skrip.aichallenge.model.MessageRole
@@ -50,6 +51,7 @@ fun ChatScreen(
             onStrategyChange = { viewModel.switchStrategy(it) },
             onModeChange = { viewModel.switchQuestionMode(it) },
             onRetrievalModeChange = { viewModel.switchRetrievalMode(it) },
+            onGroundedModeChange = { viewModel.toggleGroundedMode(it) },
             onReindex = { viewModel.reindex() },
             onClear = { viewModel.clearMessages() }
         )
@@ -111,6 +113,7 @@ private fun TopBar(
     onStrategyChange: (ChunkingStrategy) -> Unit,
     onModeChange: (QuestionMode) -> Unit,
     onRetrievalModeChange: (RetrievalMode) -> Unit,
+    onGroundedModeChange: (Boolean) -> Unit,
     onReindex: () -> Unit,
     onClear: () -> Unit
 ) {
@@ -129,7 +132,7 @@ private fun TopBar(
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 Text(
-                    text = "RAG Demo - Day 23",
+                    text = "RAG Demo - Day 24",
                     style = MaterialTheme.typography.headlineSmall,
                     fontWeight = FontWeight.Bold
                 )
@@ -207,6 +210,26 @@ private fun TopBar(
                             currentMode = state.currentRetrievalMode,
                             onModeChange = onRetrievalModeChange,
                             enabled = state.indexStatus?.isIndexing != true
+                        )
+                    }
+
+                    // Grounded mode toggle (Day 24)
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(4.dp)
+                    ) {
+                        Text(
+                            text = "Grounded:",
+                            style = MaterialTheme.typography.bodyMedium
+                        )
+                        Switch(
+                            checked = state.groundedMode,
+                            onCheckedChange = onGroundedModeChange,
+                            enabled = state.indexStatus?.isIndexing != true,
+                            colors = SwitchDefaults.colors(
+                                checkedThumbColor = Color(0xFF4CAF50),
+                                checkedTrackColor = Color(0xFF4CAF50).copy(alpha = 0.5f)
+                            )
                         )
                     }
                 }
@@ -434,7 +457,7 @@ private fun EmptyState(ollamaAvailable: Boolean) {
         Spacer(modifier = Modifier.height(8.dp))
         Text(
             text = if (ollamaAvailable) {
-                "Ask questions about your documents.\nClick 'Reindex' to build the search index.\n\nDay 23: Compare Baseline vs Filtered vs Rewrite modes!"
+                "Ask questions about your documents.\nClick 'Reindex' to build the search index.\n\nDay 24: Grounded mode with quotes, sources & anti-hallucination!"
             } else {
                 "Please start Ollama to use this demo:\nollama serve"
             },
@@ -447,10 +470,10 @@ private fun EmptyState(ollamaAvailable: Boolean) {
 @Composable
 private fun MessageBubble(message: ChatMessage) {
     val isUser = message.role == MessageRole.USER
-    val backgroundColor = if (isUser) {
-        MaterialTheme.colorScheme.primaryContainer
-    } else {
-        MaterialTheme.colorScheme.surfaceVariant
+    val backgroundColor = when {
+        isUser -> MaterialTheme.colorScheme.primaryContainer
+        message.isFallback -> Color(0xFFFFF3E0) // Light orange for fallback
+        else -> MaterialTheme.colorScheme.surfaceVariant
     }
 
     Column(
@@ -463,10 +486,57 @@ private fun MessageBubble(message: ChatMessage) {
             modifier = Modifier.widthIn(max = 600.dp)
         ) {
             Column(modifier = Modifier.padding(12.dp)) {
+                // Fallback indicator (Day 24)
+                if (!isUser && message.isFallback) {
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(4.dp)
+                    ) {
+                        Surface(
+                            shape = RoundedCornerShape(4.dp),
+                            color = Color(0xFFFF9800).copy(alpha = 0.2f)
+                        ) {
+                            Text(
+                                text = "LOW RELEVANCE",
+                                modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp),
+                                style = MaterialTheme.typography.labelSmall,
+                                fontWeight = FontWeight.Bold,
+                                color = Color(0xFFE65100)
+                            )
+                        }
+                        message.averageRelevance?.let { relevance ->
+                            Text(
+                                text = "%.0f%%".format(relevance * 100),
+                                style = MaterialTheme.typography.labelSmall,
+                                color = Color(0xFFE65100)
+                            )
+                        }
+                    }
+                    Spacer(modifier = Modifier.height(8.dp))
+                }
+
+                // Main content
                 Text(
                     text = message.content,
                     style = MaterialTheme.typography.bodyMedium
                 )
+
+                // Quotes section (Day 24)
+                if (!isUser && message.quotes.isNotEmpty()) {
+                    Spacer(modifier = Modifier.height(8.dp))
+                    HorizontalDivider()
+                    Spacer(modifier = Modifier.height(8.dp))
+                    Text(
+                        text = "Supporting Quotes:",
+                        style = MaterialTheme.typography.labelSmall,
+                        fontWeight = FontWeight.Bold,
+                        color = Color(0xFF1976D2)
+                    )
+                    Spacer(modifier = Modifier.height(4.dp))
+                    message.quotes.forEach { quote ->
+                        QuoteItem(quote = quote)
+                    }
+                }
 
                 // Sources for assistant messages
                 if (!isUser && message.sources.isNotEmpty()) {
@@ -488,6 +558,52 @@ private fun MessageBubble(message: ChatMessage) {
                         )
                     }
                 }
+
+                // Relevance indicator (non-fallback)
+                if (!isUser && !message.isFallback && message.averageRelevance != null) {
+                    Spacer(modifier = Modifier.height(4.dp))
+                    Text(
+                        text = "Relevance: %.0f%%".format(message.averageRelevance * 100),
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f)
+                    )
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun QuoteItem(quote: AnswerQuote) {
+    Surface(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(vertical = 2.dp),
+        shape = RoundedCornerShape(4.dp),
+        color = Color(0xFF1976D2).copy(alpha = 0.05f)
+    ) {
+        Column(modifier = Modifier.padding(8.dp)) {
+            Text(
+                text = "\"${quote.text}\"",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.8f),
+                fontWeight = FontWeight.Medium
+            )
+            Spacer(modifier = Modifier.height(2.dp))
+            Row(
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                Text(
+                    text = "%.0f%%".format(quote.relevance * 100),
+                    style = MaterialTheme.typography.labelSmall,
+                    color = Color(0xFF1976D2),
+                    fontWeight = FontWeight.Bold
+                )
+                Text(
+                    text = "${quote.file}${quote.section?.let { " / $it" } ?: ""}",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f)
+                )
             }
         }
     }
@@ -599,7 +715,7 @@ private fun InputArea(
                 Spacer(modifier = Modifier.weight(1f))
 
                 Text(
-                    text = "Compare: Baseline → Filtered → Rewrite",
+                    text = "Day 24: Grounded mode shows quotes & prevents hallucinations",
                     style = MaterialTheme.typography.labelSmall,
                     color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.4f)
                 )

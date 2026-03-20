@@ -123,6 +123,56 @@ class OllamaClient(
     }
 
     /**
+     * Grounded chat - строгий режим с анти-галлюцинациями
+     */
+    suspend fun chatGrounded(
+        userMessage: String,
+        context: String
+    ): String {
+        val messages = listOf(
+            ChatMessage(
+                role = "system",
+                content = """You are a precise assistant that answers questions ONLY based on the provided context.
+
+STRICT RULES:
+1. Answer ONLY using information from the context below
+2. If the context doesn't contain the answer, say "I cannot find this information in the provided documents"
+3. Do NOT add information from your general knowledge
+4. Be concise and factual
+5. Quote or paraphrase directly from the context when possible
+
+Context:
+$context"""
+            ),
+            ChatMessage(role = "user", content = userMessage)
+        )
+
+        val response = client.post("$baseUrl/api/chat") {
+            contentType(ContentType.Application.Json)
+            setBody(ChatRequest(
+                model = chatModel,
+                messages = messages,
+                stream = false
+            ))
+        }
+
+        val responseText = response.bodyAsText()
+        val lines = responseText.trim().lines().filter { it.isNotBlank() }
+
+        val fullContent = StringBuilder()
+        for (line in lines) {
+            try {
+                val part = json.decodeFromString<ChatResponse>(line)
+                fullContent.append(part.message.content)
+            } catch (e: Exception) {
+                // Skip malformed lines
+            }
+        }
+
+        return fullContent.toString()
+    }
+
+    /**
      * Прямой запрос к LLM без контекста (режим PLAIN)
      */
     suspend fun chatPlain(userMessage: String): String {

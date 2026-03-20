@@ -1,5 +1,7 @@
 package dev.skrip.aichallenge.rag
 
+import dev.skrip.aichallenge.grounding.AnswerabilityChecker
+import dev.skrip.aichallenge.grounding.QuoteExtractor
 import dev.skrip.aichallenge.model.*
 import dev.skrip.aichallenge.ollama.OllamaClient
 import dev.skrip.aichallenge.retrieval.ImprovedRetrieval
@@ -14,9 +16,12 @@ data class RagResponse(
 class RagService(
     private val ollamaClient: OllamaClient = OllamaClient(),
     private val search: SemanticSearch = SemanticSearch(),
-    private val config: RetrievalConfig = RetrievalConfig()
+    private val config: RetrievalConfig = RetrievalConfig(),
+    private val groundingConfig: GroundingConfig = GroundingConfig()
 ) {
     private val improvedRetrieval = ImprovedRetrieval(ollamaClient, search, config)
+    private val quoteExtractor = QuoteExtractor(groundingConfig)
+    private val answerabilityChecker = AnswerabilityChecker(groundingConfig)
 
     /**
      * Ответ в режиме PLAIN - прямой запрос к LLM без retrieval
@@ -32,6 +37,68 @@ class RagService(
             answer = answer,
             sources = emptyList(),
             durationMs = System.currentTimeMillis() - startTime
+        )
+    }
+
+    /**
+     * Grounded RAG ответ с цитатами, источниками и fallback
+     */
+    suspend fun askGrounded(
+        query: String,
+        index: DocumentIndex,
+        retrievalMode: RetrievalMode = RetrievalMode.BASELINE
+    ): GroundedAnswer {
+        val startTime = System.currentTimeMillis()
+
+        // 1. Improved retrieval
+        val retrievalResult = improvedRetrieval.retrieve(query, index, retrievalMode)
+
+        // 2. Answerability check
+        val answerability = answerabilityChecker.check(retrievalResult.results)
+
+        // 3. Если нельзя ответить - возвращаем fallback
+        if (!answerability.canAnswer) {
+            return GroundedAnswer(
+                query = query,
+                answer = answerabilityChecker.getFallbackAnswer(),
+                sources = emptyList(),
+                quotes = emptyList(),
+                isFallback = true,
+                averageRelevance = answerability.averageRelevance,
+                durationMs = System.currentTimeMillis() - startTime,
+                retrievalMode = retrievalMode,
+                retrievalStats = retrievalResult.stats
+            )
+        }
+
+        // 4. Извлекаем цитаты
+        val quotes = quoteExtractor.extractQuotes(query, retrievalResult.results)
+
+        // 5. Строим sources
+        val sources = retrievalResult.results.map { result ->
+            GroundedSource(
+                file = result.chunk.metadata.file,
+                section = result.chunk.metadata.section,
+                chunkId = result.chunk.id,
+                similarity = result.combinedScore,
+                textPreview = result.chunk.text.take(150) + "..."
+            )
+        }
+
+        // 6. Build context и генерируем ответ
+        val context = buildContextFromEnhanced(retrievalResult.results)
+        val answer = ollamaClient.chatGrounded(query, context)
+
+        return GroundedAnswer(
+            query = query,
+            answer = answer,
+            sources = sources,
+            quotes = quotes,
+            isFallback = false,
+            averageRelevance = answerability.averageRelevance,
+            durationMs = System.currentTimeMillis() - startTime,
+            retrievalMode = retrievalMode,
+            retrievalStats = retrievalResult.stats
         )
     }
 

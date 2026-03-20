@@ -20,6 +20,8 @@ data class ChatState(
     val currentStrategy: ChunkingStrategy = ChunkingStrategy.STRUCTURED,
     val currentQuestionMode: QuestionMode = QuestionMode.RAG,
     val currentRetrievalMode: RetrievalMode = RetrievalMode.BASELINE,
+    /** Включен ли grounded режим (Day 24) */
+    val groundedMode: Boolean = true,
     val indexStatus: IndexStatus? = null,
     val ollamaAvailable: Boolean = false,
     val error: String? = null
@@ -88,6 +90,10 @@ class ChatViewModel : ViewModel() {
         _state.value = _state.value.copy(currentRetrievalMode = mode)
     }
 
+    fun toggleGroundedMode(enabled: Boolean) {
+        _state.value = _state.value.copy(groundedMode = enabled)
+    }
+
     fun reindex() {
         viewModelScope.launch {
             val strategy = _state.value.currentStrategy
@@ -146,6 +152,7 @@ class ChatViewModel : ViewModel() {
 
         val mode = _state.value.currentQuestionMode
         val retrievalMode = _state.value.currentRetrievalMode
+        val groundedMode = _state.value.groundedMode
         val index = currentIndex
 
         // RAG mode requires index
@@ -155,7 +162,7 @@ class ChatViewModel : ViewModel() {
         }
 
         // Build mode label
-        val modeLabel = buildModeLabel(mode, retrievalMode)
+        val modeLabel = buildModeLabel(mode, retrievalMode, groundedMode)
         val userMessage = ChatMessage(
             id = UUID.randomUUID().toString(),
             role = MessageRole.USER,
@@ -170,42 +177,13 @@ class ChatViewModel : ViewModel() {
 
         viewModelScope.launch {
             try {
-                val result = ragService.ask(question, mode, index, retrievalMode)
-
-                // Convert AnswerSource to SearchResult for compatibility
-                val searchResults = result.sources.map { source ->
-                    SearchResult(
-                        chunk = Chunk(
-                            id = "",
-                            text = source.textPreview,
-                            metadata = ChunkMetadata(
-                                source = source.file,
-                                file = source.file,
-                                title = null,
-                                section = source.section,
-                                strategy = _state.value.currentStrategy,
-                                startOffset = 0,
-                                endOffset = 0
-                            )
-                        ),
-                        similarity = source.similarity
-                    )
+                if (mode == QuestionMode.RAG && groundedMode && index != null) {
+                    // Grounded RAG mode
+                    askGrounded(question, index, retrievalMode, modeLabel)
+                } else {
+                    // Regular mode
+                    askRegular(question, mode, index, retrievalMode, modeLabel)
                 }
-
-                // Build response info with retrieval stats
-                val responseInfo = buildResponseInfo(result, modeLabel)
-
-                val assistantMessage = ChatMessage(
-                    id = UUID.randomUUID().toString(),
-                    role = MessageRole.ASSISTANT,
-                    content = "${result.answer}\n\n$responseInfo",
-                    sources = searchResults
-                )
-
-                _state.value = _state.value.copy(
-                    messages = _state.value.messages + assistantMessage,
-                    isLoading = false
-                )
             } catch (e: Exception) {
                 _state.value = _state.value.copy(
                     isLoading = false,
@@ -215,7 +193,103 @@ class ChatViewModel : ViewModel() {
         }
     }
 
-    private fun buildModeLabel(mode: QuestionMode, retrievalMode: RetrievalMode): String {
+    private suspend fun askGrounded(
+        question: String,
+        index: DocumentIndex,
+        retrievalMode: RetrievalMode,
+        modeLabel: String
+    ) {
+        val result = ragService.askGrounded(question, index, retrievalMode)
+
+        // Convert sources to SearchResult for compatibility
+        val searchResults = result.sources.map { source ->
+            SearchResult(
+                chunk = Chunk(
+                    id = source.chunkId,
+                    text = source.textPreview,
+                    metadata = ChunkMetadata(
+                        source = source.file,
+                        file = source.file,
+                        title = null,
+                        section = source.section,
+                        strategy = _state.value.currentStrategy,
+                        startOffset = 0,
+                        endOffset = 0
+                    )
+                ),
+                similarity = source.similarity
+            )
+        }
+
+        // Build response info
+        val responseInfo = buildGroundedResponseInfo(result, modeLabel)
+
+        val assistantMessage = ChatMessage(
+            id = UUID.randomUUID().toString(),
+            role = MessageRole.ASSISTANT,
+            content = "${result.answer}\n\n$responseInfo",
+            sources = searchResults,
+            quotes = result.quotes,
+            isFallback = result.isFallback,
+            averageRelevance = result.averageRelevance
+        )
+
+        _state.value = _state.value.copy(
+            messages = _state.value.messages + assistantMessage,
+            isLoading = false
+        )
+    }
+
+    private suspend fun askRegular(
+        question: String,
+        mode: QuestionMode,
+        index: DocumentIndex?,
+        retrievalMode: RetrievalMode,
+        modeLabel: String
+    ) {
+        val result = ragService.ask(question, mode, index, retrievalMode)
+
+        // Convert AnswerSource to SearchResult for compatibility
+        val searchResults = result.sources.map { source ->
+            SearchResult(
+                chunk = Chunk(
+                    id = "",
+                    text = source.textPreview,
+                    metadata = ChunkMetadata(
+                        source = source.file,
+                        file = source.file,
+                        title = null,
+                        section = source.section,
+                        strategy = _state.value.currentStrategy,
+                        startOffset = 0,
+                        endOffset = 0
+                    )
+                ),
+                similarity = source.similarity
+            )
+        }
+
+        // Build response info with retrieval stats
+        val responseInfo = buildResponseInfo(result, modeLabel)
+
+        val assistantMessage = ChatMessage(
+            id = UUID.randomUUID().toString(),
+            role = MessageRole.ASSISTANT,
+            content = "${result.answer}\n\n$responseInfo",
+            sources = searchResults
+        )
+
+        _state.value = _state.value.copy(
+            messages = _state.value.messages + assistantMessage,
+            isLoading = false
+        )
+    }
+
+    private fun buildModeLabel(
+        mode: QuestionMode,
+        retrievalMode: RetrievalMode,
+        groundedMode: Boolean
+    ): String {
         return when (mode) {
             QuestionMode.PLAIN -> "[Plain]"
             QuestionMode.RAG -> {
@@ -224,7 +298,33 @@ class ChatViewModel : ViewModel() {
                     RetrievalMode.FILTERED -> "Filtered"
                     RetrievalMode.REWRITE_FILTERED -> "Rewrite"
                 }
-                "[RAG:$retrievalLabel]"
+                if (groundedMode) {
+                    "[RAG:$retrievalLabel+Grounded]"
+                } else {
+                    "[RAG:$retrievalLabel]"
+                }
+            }
+        }
+    }
+
+    private fun buildGroundedResponseInfo(result: GroundedAnswer, modeLabel: String): String {
+        val stats = result.retrievalStats
+        return buildString {
+            append("$modeLabel (${result.durationMs}ms)")
+            if (result.isFallback) {
+                append(" | FALLBACK (low relevance: ${formatPercent(result.averageRelevance)})")
+            } else {
+                append(" | Relevance: ${formatPercent(result.averageRelevance)}")
+            }
+            if (stats != null) {
+                append(" | Retrieved: ${stats.rawRetrievedCount}")
+                append(" → Used: ${stats.finalUsedCount}")
+                if (stats.rewrittenQuery != null) {
+                    append("\nQuery rewritten: \"${stats.rewrittenQuery}\"")
+                }
+            }
+            if (result.quotes.isNotEmpty()) {
+                append(" | Quotes: ${result.quotes.size}")
             }
         }
     }
@@ -244,6 +344,10 @@ class ChatViewModel : ViewModel() {
         } else {
             "$modeLabel (${result.durationMs}ms)"
         }
+    }
+
+    private fun formatPercent(value: Float): String {
+        return "%.0f%%".format(value * 100)
     }
 
     fun clearError() {
