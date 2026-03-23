@@ -22,6 +22,12 @@ data class ChatState(
     val currentRetrievalMode: RetrievalMode = RetrievalMode.BASELINE,
     /** Включен ли grounded режим (Day 24) */
     val groundedMode: Boolean = true,
+    /** Day 25: Включен ли режим памяти */
+    val memoryEnabled: Boolean = true,
+    /** Day 25: Task state (цель, уточнения, ограничения) */
+    val taskState: TaskState = TaskState(),
+    /** Day 25: ID текущего диалога */
+    val conversationId: String = UUID.randomUUID().toString(),
     val indexStatus: IndexStatus? = null,
     val ollamaAvailable: Boolean = false,
     val error: String? = null
@@ -45,6 +51,9 @@ class ChatViewModel : ViewModel() {
     private val ragService = RagService(ollamaClient)
 
     private var currentIndex: DocumentIndex? = null
+
+    // Day 25: Conversation memory
+    private var conversationMemory = ConversationMemory(id = _state.value.conversationId)
 
     init {
         checkOllamaAndLoadIndex()
@@ -92,6 +101,22 @@ class ChatViewModel : ViewModel() {
 
     fun toggleGroundedMode(enabled: Boolean) {
         _state.value = _state.value.copy(groundedMode = enabled)
+    }
+
+    /** Day 25: Включить/выключить режим памяти */
+    fun toggleMemoryMode(enabled: Boolean) {
+        _state.value = _state.value.copy(memoryEnabled = enabled)
+    }
+
+    /** Day 25: Начать новый диалог (сбросить память) */
+    fun startNewConversation() {
+        val newId = UUID.randomUUID().toString()
+        conversationMemory = ConversationMemory(id = newId)
+        _state.value = _state.value.copy(
+            messages = emptyList(),
+            taskState = TaskState(),
+            conversationId = newId
+        )
     }
 
     fun reindex() {
@@ -153,6 +178,7 @@ class ChatViewModel : ViewModel() {
         val mode = _state.value.currentQuestionMode
         val retrievalMode = _state.value.currentRetrievalMode
         val groundedMode = _state.value.groundedMode
+        val memoryEnabled = _state.value.memoryEnabled
         val index = currentIndex
 
         // RAG mode requires index
@@ -162,7 +188,7 @@ class ChatViewModel : ViewModel() {
         }
 
         // Build mode label
-        val modeLabel = buildModeLabel(mode, retrievalMode, groundedMode)
+        val modeLabel = buildModeLabel(mode, retrievalMode, groundedMode, memoryEnabled)
         val userMessage = ChatMessage(
             id = UUID.randomUUID().toString(),
             role = MessageRole.USER,
@@ -177,11 +203,14 @@ class ChatViewModel : ViewModel() {
 
         viewModelScope.launch {
             try {
-                if (mode == QuestionMode.RAG && groundedMode && index != null) {
-                    // Grounded RAG mode
+                if (memoryEnabled) {
+                    // Day 25: Memory-enabled mode
+                    askWithMemory(question, mode, index, retrievalMode, groundedMode, modeLabel)
+                } else if (mode == QuestionMode.RAG && groundedMode && index != null) {
+                    // Grounded RAG mode (no memory)
                     askGrounded(question, index, retrievalMode, modeLabel)
                 } else {
-                    // Regular mode
+                    // Regular mode (no memory)
                     askRegular(question, mode, index, retrievalMode, modeLabel)
                 }
             } catch (e: Exception) {
@@ -285,24 +314,112 @@ class ChatViewModel : ViewModel() {
         )
     }
 
+    /** Day 25: Memory-enabled answer */
+    private suspend fun askWithMemory(
+        question: String,
+        mode: QuestionMode,
+        index: DocumentIndex?,
+        retrievalMode: RetrievalMode,
+        groundedMode: Boolean,
+        modeLabel: String
+    ) {
+        // Update memory with user message before calling LLM
+        conversationMemory = conversationMemory.addUserMessage(question)
+
+        val result = if (mode == QuestionMode.RAG && index != null) {
+            ragService.askWithMemory(question, index, conversationMemory, retrievalMode, groundedMode)
+        } else {
+            ragService.askPlainWithMemory(question, conversationMemory)
+        }
+
+        // Update memory with assistant response
+        conversationMemory = conversationMemory
+            .addAssistantMessage(result.answer)
+            .updateTaskState(result.updatedTaskState)
+
+        // Update task state in UI
+        _state.value = _state.value.copy(taskState = result.updatedTaskState)
+
+        // Convert sources to SearchResult for compatibility
+        val searchResults = result.sources.map { source ->
+            SearchResult(
+                chunk = Chunk(
+                    id = "",
+                    text = source.textPreview,
+                    metadata = ChunkMetadata(
+                        source = source.file,
+                        file = source.file,
+                        title = null,
+                        section = source.section,
+                        strategy = _state.value.currentStrategy,
+                        startOffset = 0,
+                        endOffset = 0
+                    )
+                ),
+                similarity = source.similarity
+            )
+        }
+
+        // Build response info
+        val responseInfo = buildMemoryResponseInfo(result, modeLabel)
+
+        val assistantMessage = ChatMessage(
+            id = UUID.randomUUID().toString(),
+            role = MessageRole.ASSISTANT,
+            content = "${result.answer}\n\n$responseInfo",
+            sources = searchResults,
+            quotes = result.quotes,
+            isFallback = result.isFallback,
+            averageRelevance = result.averageRelevance
+        )
+
+        _state.value = _state.value.copy(
+            messages = _state.value.messages + assistantMessage,
+            isLoading = false
+        )
+    }
+
+    private fun buildMemoryResponseInfo(result: MemoryAnswerResult, modeLabel: String): String {
+        val stats = result.retrievalStats
+        return buildString {
+            append("$modeLabel (${result.durationMs}ms)")
+            if (result.isFallback) {
+                append(" | FALLBACK (low relevance: ${formatPercent(result.averageRelevance ?: 0f)})")
+            } else if (result.averageRelevance != null) {
+                append(" | Relevance: ${formatPercent(result.averageRelevance)}")
+            }
+            if (stats != null) {
+                append(" | Retrieved: ${stats.rawRetrievedCount}")
+                append(" → Used: ${stats.finalUsedCount}")
+                if (stats.rewrittenQuery != null) {
+                    append("\nQuery rewritten: \"${stats.rewrittenQuery}\"")
+                }
+            }
+            if (result.quotes.isNotEmpty()) {
+                append(" | Quotes: ${result.quotes.size}")
+            }
+            // Show memory info
+            append(" | Memory: ${conversationMemory.messageCount} msgs")
+        }
+    }
+
     private fun buildModeLabel(
         mode: QuestionMode,
         retrievalMode: RetrievalMode,
-        groundedMode: Boolean
+        groundedMode: Boolean,
+        memoryEnabled: Boolean = false
     ): String {
+        val memoryTag = if (memoryEnabled) "+Memory" else ""
         return when (mode) {
-            QuestionMode.PLAIN -> "[Plain]"
+            QuestionMode.PLAIN -> "[Plain$memoryTag]"
             QuestionMode.RAG -> {
                 val retrievalLabel = when (retrievalMode) {
                     RetrievalMode.BASELINE -> "Baseline"
                     RetrievalMode.FILTERED -> "Filtered"
                     RetrievalMode.REWRITE_FILTERED -> "Rewrite"
                 }
-                if (groundedMode) {
-                    "[RAG:$retrievalLabel+Grounded]"
-                } else {
-                    "[RAG:$retrievalLabel]"
-                }
+                val groundedTag = if (groundedMode) "+Grounded" else ""
+                "[RAG:$retrievalLabel$groundedTag$memoryTag]"
             }
         }
     }
@@ -355,7 +472,8 @@ class ChatViewModel : ViewModel() {
     }
 
     fun clearMessages() {
-        _state.value = _state.value.copy(messages = emptyList())
+        // Day 25: Also reset conversation memory
+        startNewConversation()
     }
 
     override fun onCleared() {

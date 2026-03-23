@@ -1,5 +1,7 @@
 package dev.skrip.aichallenge.rag
 
+import dev.skrip.aichallenge.conversation.SystemPromptBuilder
+import dev.skrip.aichallenge.conversation.TaskStateExtractor
 import dev.skrip.aichallenge.grounding.AnswerabilityChecker
 import dev.skrip.aichallenge.grounding.QuoteExtractor
 import dev.skrip.aichallenge.model.*
@@ -17,11 +19,16 @@ class RagService(
     private val ollamaClient: OllamaClient = OllamaClient(),
     private val search: SemanticSearch = SemanticSearch(),
     private val config: RetrievalConfig = RetrievalConfig(),
-    private val groundingConfig: GroundingConfig = GroundingConfig()
+    private val groundingConfig: GroundingConfig = GroundingConfig(),
+    private val memoryConfig: MemoryConfig = MemoryConfig()
 ) {
     private val improvedRetrieval = ImprovedRetrieval(ollamaClient, search, config)
     private val quoteExtractor = QuoteExtractor(groundingConfig)
     private val answerabilityChecker = AnswerabilityChecker(groundingConfig)
+
+    // Day 25: Memory components
+    private val systemPromptBuilder = SystemPromptBuilder()
+    private val taskStateExtractor = TaskStateExtractor()
 
     /**
      * Ответ в режиме PLAIN - прямой запрос к LLM без retrieval
@@ -99,6 +106,146 @@ class RagService(
             durationMs = System.currentTimeMillis() - startTime,
             retrievalMode = retrievalMode,
             retrievalStats = retrievalResult.stats
+        )
+    }
+
+    /**
+     * Day 25: RAG ответ с памятью диалога
+     *
+     * Учитывает историю диалога и task state при генерации ответа.
+     */
+    suspend fun askWithMemory(
+        query: String,
+        index: DocumentIndex,
+        memory: ConversationMemory,
+        retrievalMode: RetrievalMode = RetrievalMode.BASELINE,
+        isGrounded: Boolean = true
+    ): MemoryAnswerResult {
+        val startTime = System.currentTimeMillis()
+
+        // 1. Update task state from user message
+        val isFirstMessage = memory.turns.isEmpty()
+        val updatedTaskState = taskStateExtractor.updateFromUserMessage(
+            query, memory.taskState, isFirstMessage
+        )
+
+        // 2. Improved retrieval
+        val retrievalResult = improvedRetrieval.retrieve(query, index, retrievalMode)
+
+        // 3. Answerability check (if grounded)
+        val answerability = if (isGrounded) {
+            answerabilityChecker.check(retrievalResult.results)
+        } else {
+            AnswerabilityResult(canAnswer = true, reason = null, averageRelevance = 0.5f, relevantChunkCount = retrievalResult.results.size)
+        }
+
+        // 4. Handle fallback case
+        if (isGrounded && !answerability.canAnswer) {
+            return MemoryAnswerResult(
+                answer = answerabilityChecker.getFallbackAnswer(),
+                sources = emptyList(),
+                quotes = emptyList(),
+                updatedTaskState = updatedTaskState,
+                durationMs = System.currentTimeMillis() - startTime,
+                retrievalMode = retrievalMode,
+                retrievalStats = retrievalResult.stats,
+                isFallback = true,
+                averageRelevance = answerability.averageRelevance
+            )
+        }
+
+        // 5. Extract quotes (if grounded)
+        val quotes = if (isGrounded) {
+            quoteExtractor.extractQuotes(query, retrievalResult.results)
+        } else {
+            emptyList()
+        }
+
+        // 6. Build context
+        val context = buildContextFromEnhanced(retrievalResult.results)
+
+        // 7. Build system prompt with task state
+        val systemPrompt = systemPromptBuilder.buildRagPrompt(
+            context = context,
+            taskState = updatedTaskState,
+            isGrounded = isGrounded
+        )
+
+        // 8. Format history for LLM
+        val history = systemPromptBuilder.formatHistory(
+            memory.turns,
+            memoryConfig.maxHistoryTurns
+        )
+
+        // 9. Generate answer with history
+        val answer = ollamaClient.chatWithHistory(systemPrompt, history, query)
+
+        // 10. Update task state from answer
+        val finalTaskState = taskStateExtractor.updateFromAssistantAnswer(answer, updatedTaskState)
+
+        // 11. Build sources
+        val sources = retrievalResult.results.map { result ->
+            AnswerSource(
+                file = result.chunk.metadata.file,
+                section = result.chunk.metadata.section,
+                similarity = result.combinedScore,
+                textPreview = result.chunk.text.take(150) + "..."
+            )
+        }
+
+        return MemoryAnswerResult(
+            answer = answer,
+            sources = sources,
+            quotes = quotes,
+            updatedTaskState = finalTaskState,
+            durationMs = System.currentTimeMillis() - startTime,
+            retrievalMode = retrievalMode,
+            retrievalStats = retrievalResult.stats,
+            isFallback = false,
+            averageRelevance = answerability.averageRelevance
+        )
+    }
+
+    /**
+     * Day 25: Plain режим с памятью диалога
+     */
+    suspend fun askPlainWithMemory(
+        query: String,
+        memory: ConversationMemory
+    ): MemoryAnswerResult {
+        val startTime = System.currentTimeMillis()
+
+        // 1. Update task state from user message
+        val isFirstMessage = memory.turns.isEmpty()
+        val updatedTaskState = taskStateExtractor.updateFromUserMessage(
+            query, memory.taskState, isFirstMessage
+        )
+
+        // 2. Build system prompt
+        val systemPrompt = systemPromptBuilder.buildPlainPrompt(updatedTaskState)
+
+        // 3. Format history for LLM
+        val history = systemPromptBuilder.formatHistory(
+            memory.turns,
+            memoryConfig.maxHistoryTurns
+        )
+
+        // 4. Generate answer with history
+        val answer = ollamaClient.chatWithHistory(systemPrompt, history, query)
+
+        // 5. Update task state from answer
+        val finalTaskState = taskStateExtractor.updateFromAssistantAnswer(answer, updatedTaskState)
+
+        return MemoryAnswerResult(
+            answer = answer,
+            sources = emptyList(),
+            quotes = emptyList(),
+            updatedTaskState = finalTaskState,
+            durationMs = System.currentTimeMillis() - startTime,
+            retrievalMode = RetrievalMode.BASELINE,
+            retrievalStats = null,
+            isFallback = false,
+            averageRelevance = null
         )
     }
 

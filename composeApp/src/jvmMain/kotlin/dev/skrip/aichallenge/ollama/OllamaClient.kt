@@ -209,6 +209,56 @@ $context"""
         return fullContent.toString()
     }
 
+    /**
+     * Day 25: Chat с историей диалога
+     *
+     * @param systemPrompt Динамический system prompt (от SystemPromptBuilder)
+     * @param history История диалога [(role, content), ...]
+     * @param userMessage Текущее сообщение пользователя
+     */
+    suspend fun chatWithHistory(
+        systemPrompt: String,
+        history: List<Pair<String, String>>,
+        userMessage: String
+    ): String {
+        val messages = mutableListOf<ChatMessage>()
+
+        // 1. System prompt
+        messages.add(ChatMessage(role = "system", content = systemPrompt))
+
+        // 2. Conversation history
+        for ((role, content) in history) {
+            messages.add(ChatMessage(role = role, content = content))
+        }
+
+        // 3. Current user message
+        messages.add(ChatMessage(role = "user", content = userMessage))
+
+        val response = client.post("$baseUrl/api/chat") {
+            contentType(ContentType.Application.Json)
+            setBody(ChatRequest(
+                model = chatModel,
+                messages = messages,
+                stream = false
+            ))
+        }
+
+        val responseText = response.bodyAsText()
+        val lines = responseText.trim().lines().filter { it.isNotBlank() }
+
+        val fullContent = StringBuilder()
+        for (line in lines) {
+            try {
+                val part = json.decodeFromString<ChatResponse>(line)
+                fullContent.append(part.message.content)
+            } catch (e: Exception) {
+                // Skip malformed lines
+            }
+        }
+
+        return fullContent.toString()
+    }
+
     suspend fun isAvailable(): Boolean {
         return try {
             client.get("$baseUrl/api/tags")

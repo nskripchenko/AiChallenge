@@ -23,6 +23,7 @@ import dev.skrip.aichallenge.model.ChunkingStrategy
 import dev.skrip.aichallenge.model.MessageRole
 import dev.skrip.aichallenge.model.QuestionMode
 import dev.skrip.aichallenge.model.RetrievalMode
+import dev.skrip.aichallenge.model.TaskState
 import kotlinx.coroutines.launch
 
 @Composable
@@ -52,9 +53,15 @@ fun ChatScreen(
             onModeChange = { viewModel.switchQuestionMode(it) },
             onRetrievalModeChange = { viewModel.switchRetrievalMode(it) },
             onGroundedModeChange = { viewModel.toggleGroundedMode(it) },
+            onMemoryModeChange = { viewModel.toggleMemoryMode(it) },
             onReindex = { viewModel.reindex() },
             onClear = { viewModel.clearMessages() }
         )
+
+        // Day 25: Task State panel
+        if (state.memoryEnabled && !state.taskState.isEmpty()) {
+            TaskStatePanel(taskState = state.taskState)
+        }
 
         // Error banner
         state.error?.let { error ->
@@ -114,6 +121,7 @@ private fun TopBar(
     onModeChange: (QuestionMode) -> Unit,
     onRetrievalModeChange: (RetrievalMode) -> Unit,
     onGroundedModeChange: (Boolean) -> Unit,
+    onMemoryModeChange: (Boolean) -> Unit,
     onReindex: () -> Unit,
     onClear: () -> Unit
 ) {
@@ -132,7 +140,7 @@ private fun TopBar(
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 Text(
-                    text = "RAG Demo - Day 24",
+                    text = "RAG Demo - Day 25",
                     style = MaterialTheme.typography.headlineSmall,
                     fontWeight = FontWeight.Bold
                 )
@@ -232,6 +240,26 @@ private fun TopBar(
                             )
                         )
                     }
+
+                    // Memory mode toggle (Day 25)
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(4.dp)
+                    ) {
+                        Text(
+                            text = "Memory:",
+                            style = MaterialTheme.typography.bodyMedium
+                        )
+                        Switch(
+                            checked = state.memoryEnabled,
+                            onCheckedChange = onMemoryModeChange,
+                            enabled = state.indexStatus?.isIndexing != true,
+                            colors = SwitchDefaults.colors(
+                                checkedThumbColor = Color(0xFF673AB7),
+                                checkedTrackColor = Color(0xFF673AB7).copy(alpha = 0.5f)
+                            )
+                        )
+                    }
                 }
 
                 Spacer(modifier = Modifier.height(8.dp))
@@ -272,12 +300,12 @@ private fun TopBar(
                         }
 
                         OutlinedButton(onClick = onClear) {
-                            Text("Clear")
+                            Text("New Chat")
                         }
                     }
                 }
             } else {
-                // Plain mode - just show buttons
+                // Plain mode - show memory toggle and buttons
                 Spacer(modifier = Modifier.height(8.dp))
 
                 Row(
@@ -285,11 +313,35 @@ private fun TopBar(
                     horizontalArrangement = Arrangement.SpaceBetween,
                     verticalAlignment = Alignment.CenterVertically
                 ) {
-                    Text(
-                        text = "Direct LLM (no retrieval)",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.5f)
-                    )
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        Text(
+                            text = "Direct LLM (no retrieval)",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.5f)
+                        )
+
+                        // Memory toggle for Plain mode (Day 25)
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(4.dp)
+                        ) {
+                            Text(
+                                text = "Memory:",
+                                style = MaterialTheme.typography.bodySmall
+                            )
+                            Switch(
+                                checked = state.memoryEnabled,
+                                onCheckedChange = onMemoryModeChange,
+                                colors = SwitchDefaults.colors(
+                                    checkedThumbColor = Color(0xFF673AB7),
+                                    checkedTrackColor = Color(0xFF673AB7).copy(alpha = 0.5f)
+                                )
+                            )
+                        }
+                    }
 
                     Row(
                         horizontalArrangement = Arrangement.spacedBy(8.dp),
@@ -306,7 +358,7 @@ private fun TopBar(
                         }
 
                         OutlinedButton(onClick = onClear) {
-                            Text("Clear")
+                            Text("New Chat")
                         }
                     }
                 }
@@ -457,13 +509,76 @@ private fun EmptyState(ollamaAvailable: Boolean) {
         Spacer(modifier = Modifier.height(8.dp))
         Text(
             text = if (ollamaAvailable) {
-                "Ask questions about your documents.\nClick 'Reindex' to build the search index.\n\nDay 24: Grounded mode with quotes, sources & anti-hallucination!"
+                "Ask questions about your documents.\nClick 'Reindex' to build the search index.\n\nDay 25: Multi-turn chat with memory & task state tracking!"
             } else {
                 "Please start Ollama to use this demo:\nollama serve"
             },
             style = MaterialTheme.typography.bodyMedium,
             color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.4f)
         )
+    }
+}
+
+/** Day 25: Task State Panel */
+@Composable
+private fun TaskStatePanel(taskState: TaskState) {
+    Surface(
+        modifier = Modifier.fillMaxWidth(),
+        color = Color(0xFF673AB7).copy(alpha = 0.05f)
+    ) {
+        Column(
+            modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp)
+        ) {
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                Text(
+                    text = "Task State",
+                    style = MaterialTheme.typography.labelMedium,
+                    fontWeight = FontWeight.Bold,
+                    color = Color(0xFF673AB7)
+                )
+                if (taskState.goal != null) {
+                    Text(
+                        text = "|",
+                        color = Color(0xFF673AB7).copy(alpha = 0.3f)
+                    )
+                    Text(
+                        text = taskState.goal,
+                        style = MaterialTheme.typography.labelSmall,
+                        color = Color(0xFF673AB7).copy(alpha = 0.8f)
+                    )
+                }
+            }
+
+            if (taskState.clarifications.isNotEmpty()) {
+                Spacer(modifier = Modifier.height(4.dp))
+                Text(
+                    text = "Clarifications: ${taskState.clarifications.takeLast(2).joinToString(" | ")}",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f)
+                )
+            }
+
+            if (taskState.constraints.isNotEmpty()) {
+                Spacer(modifier = Modifier.height(2.dp))
+                Text(
+                    text = "Constraints: ${taskState.constraints.joinToString(", ")}",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f)
+                )
+            }
+
+            if (taskState.discoveredFacts.isNotEmpty()) {
+                Spacer(modifier = Modifier.height(2.dp))
+                Text(
+                    text = "Facts: ${taskState.discoveredFacts.size} discovered",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.5f)
+                )
+            }
+        }
     }
 }
 
@@ -715,7 +830,7 @@ private fun InputArea(
                 Spacer(modifier = Modifier.weight(1f))
 
                 Text(
-                    text = "Day 24: Grounded mode shows quotes & prevents hallucinations",
+                    text = "Day 25: Memory mode tracks conversation & task state",
                     style = MaterialTheme.typography.labelSmall,
                     color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.4f)
                 )
