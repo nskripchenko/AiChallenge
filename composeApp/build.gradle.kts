@@ -101,3 +101,18 @@ compose.desktop {
         }
     }
 }
+
+// Day 27: Quick Ask application
+tasks.register<JavaExec>("runQuickAsk") {
+    group = "application"
+    description = "Run Quick Ask - Local LLM Desktop App"
+    mainClass.set("dev.skrip.aichallenge.quickask.QuickAskAppKt")
+
+    val jvmJar = tasks.named("jvmJar")
+    dependsOn(jvmJar)
+
+    classpath = files(
+        jvmJar.map { (it as Jar).archiveFile },
+        configurations.named("jvmRuntimeClasspath")
+    )
+}

@@ -1,107 +1,56 @@
-# RAG Demo - Document Indexing
+## Quick Ask (Day 27)
 
-## День 21-25: RAG Pipeline с памятью диалога и task state
+**Quick Ask** - минималистичное desktop приложение для быстрых вопросов к локальной LLM.
 
-## Режимы работы
+### Запуск
 
-| Режим     | Описание                                     |
-|-----------|----------------------------------------------|
-| **Plain** | Прямой запрос к LLM без контекста (baseline) |
-| **RAG**   | Retrieval-Augmented Generation: поиск + LLM  |
+```bash
+# 1. Запустить Ollama (в отдельном терминале)
+ollama serve
 
-## Режимы Retrieval (Day 23)
-
-| Режим        | Pipeline                                               |
-|--------------|--------------------------------------------------------|
-| **Baseline** | query → search(top-3) → LLM                            |
-| **Filtered** | query → search(top-10) → filter → rerank → top-3 → LLM |
-| **Rewrite**  | query → **rewrite** → search → filter → rerank → LLM   |
-
-### Что делает каждый этап:
-
-- **Query Rewrite**: Переписывает вопрос в оптимизированный retrieval query
-- **Filtering**: Удаляет chunks с низким similarity, короткие тексты, дубликаты
-- **Reranking**: Комбинирует semantic similarity + keyword overlap
-
-## Grounded Mode (Day 24)
-
-**Grounded mode** - режим с защитой от галлюцинаций:
-
-| Компонент           | Описание                                                |
-|---------------------|---------------------------------------------------------|
-| **Answerability**   | Проверяет, достаточно ли информации для ответа          |
-| **Fallback**        | Если релевантность < 35%, возвращает "не знаю"          |
-| **Quotes**          | Извлекает цитаты из документов для подтверждения        |
-| **Grounded Prompt** | Строгий системный prompt: "отвечай ТОЛЬКО по контексту" |
-
-### Как это работает:
-
-```
-Query → Retrieval → Answerability Check ─┬─→ (low relevance) → Fallback Answer
-                                         │
-                                         └─→ (ok) → Extract Quotes →
-                                                    Grounded LLM → Answer with Citations
+# 2. Запустить Quick Ask
+./gradlew :composeApp:runQuickAsk
 ```
 
-### UI индикация:
+### Требования
 
-- **Grounded toggle**: Включает/выключает защиту от галлюцинаций
-- **LOW RELEVANCE badge**: Показывается при срабатывании fallback
-- **Supporting Quotes**: Цитаты из документов с указанием источника
-- **Relevance %**: Показывает среднюю релевантность retrieved chunks
+- Ollama установлен и запущен
+- Модель llama3.2 (или другая) загружена: `ollama pull llama3.2`
 
-## Memory Mode (Day 25)
+### Возможности
 
-**Memory mode** - многоходовый чат с памятью:
+| Функция            | Описание                                    |
+|--------------------|---------------------------------------------|
+| **Минимальный UI** | Только поле ввода и область ответа          |
+| **Dark Theme**     | Тёмная тема Material3                       |
+| **Enter to Send**  | Отправка вопроса по Enter                   |
+| **Loading State**  | Индикатор загрузки во время ответа          |
+| **Error Handling** | Отображение ошибок (если Ollama недоступна) |
 
-| Компонент               | Описание                                        |
-|-------------------------|-------------------------------------------------|
-| **ConversationMemory**  | Хранит историю всех сообщений диалога           |
-| **TaskState**           | Отслеживает цель, уточнения, ограничения, факты |
-| **SystemPromptBuilder** | Динамически строит prompt с учетом контекста    |
-| **TaskStateExtractor**  | Извлекает task state из сообщений               |
-
-### Task State включает:
-
-- **Goal**: Цель диалога (что пользователь хочет узнать)
-- **Clarifications**: Уточнения от пользователя
-- **Constraints**: Ограничения и требования
-- **Discovered Facts**: Ключевые факты из документов
-
-### Как это работает:
+### Архитектура
 
 ```
-User Question
-      │
-      ▼
 ┌─────────────────────────────────────┐
-│     TaskStateExtractor              │
-│  - Extract goal from first message  │
-│  - Track clarifications             │
-│  - Note constraints                 │
+│           Quick Ask UI              │
+│  ┌─────────────────────┐ ┌───────┐  │
+│  │   Question Input    │ │  Ask  │  │
+│  └─────────────────────┘ └───────┘  │
+│  ┌─────────────────────────────────┐│
+│  │                                 ││
+│  │         Answer Area             ││
+│  │                                 ││
+│  └─────────────────────────────────┘│
 └─────────────────────────────────────┘
-      │
-      ▼
+              │
+              ▼
 ┌─────────────────────────────────────┐
-│     SystemPromptBuilder             │
-│  - Base instructions                │
-│  - Task state summary               │
-│  - Retrieved context (RAG)          │
+│          OllamaClient               │
+│      chatPlain(question)            │
 └─────────────────────────────────────┘
-      │
-      ▼
+              │
+              ▼
 ┌─────────────────────────────────────┐
-│   OllamaClient.chatWithHistory()    │
-│  [system] + [history] + [user]      │
+│     Ollama Server (localhost)       │
+│           llama3.2                  │
 └─────────────────────────────────────┘
-      │
-      ▼
-Answer + Updated TaskState
 ```
-
-### UI индикация:
-
-- **Memory toggle**: Включает/выключает режим памяти
-- **Task State panel**: Показывает цель, уточнения, ограничения
-- **Memory: N msgs**: Количество сообщений в памяти
-- **New Chat button**: Сбрасывает память и начинает новый диалог
