@@ -139,11 +139,18 @@ private fun TopBar(
                 horizontalArrangement = Arrangement.SpaceBetween,
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                Text(
-                    text = "RAG Demo - Day 25",
-                    style = MaterialTheme.typography.headlineSmall,
-                    fontWeight = FontWeight.Bold
-                )
+                Column {
+                    Text(
+                        text = "RAG Demo - Day 30",
+                        style = MaterialTheme.typography.headlineSmall,
+                        fontWeight = FontWeight.Bold
+                    )
+                    Text(
+                        text = "Server: ${dev.skrip.aichallenge.model.Config.OLLAMA_BASE_URL}",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.primary
+                    )
+                }
 
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     StatusChip(

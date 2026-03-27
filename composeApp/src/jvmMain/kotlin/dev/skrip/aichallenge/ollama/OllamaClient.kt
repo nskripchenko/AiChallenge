@@ -25,10 +25,20 @@ data class EmbeddingResponse(
 )
 
 @Serializable
+data class ChatOptions(
+    val temperature: Float = Config.LLM.TEMPERATURE,
+    val num_predict: Int = Config.LLM.MAX_TOKENS,
+    val num_ctx: Int = Config.LLM.CONTEXT_SIZE,
+    val top_p: Float = Config.LLM.TOP_P,
+    val repeat_penalty: Float = Config.LLM.REPEAT_PENALTY
+)
+
+@Serializable
 data class ChatRequest(
     val model: String,
     val messages: List<ChatMessage>,
-    val stream: Boolean = false
+    val stream: Boolean = false,
+    val options: ChatOptions = ChatOptions()
 )
 
 @Serializable
@@ -75,6 +85,9 @@ class OllamaClient(
         return texts.map { getEmbedding(it) }
     }
 
+    /**
+     * Day 29: Optimized RAG chat with context
+     */
     suspend fun chat(
         userMessage: String,
         context: String? = null
@@ -84,23 +97,32 @@ class OllamaClient(
         if (context != null) {
             messages.add(ChatMessage(
                 role = "system",
-                content = """You are a helpful assistant that answers questions based only on the provided context.
-                    |If the answer cannot be found in the context, say "I don't have enough information to answer this question."
-                    |Be concise and direct in your answers.
-                    |
-                    |Context:
-                    |$context""".trimMargin()
+                content = """Answer based on the provided context. Be concise and direct.
+If the answer is not in the context, say so.
+
+Context:
+$context"""
             ))
         }
 
         messages.add(ChatMessage(role = "user", content = userMessage))
+
+        // Day 29: Optimized parameters for RAG
+        val ragOptions = ChatOptions(
+            temperature = 0.3f,
+            num_predict = Config.LLM.MAX_TOKENS,
+            num_ctx = Config.LLM.CONTEXT_SIZE,
+            top_p = Config.LLM.TOP_P,
+            repeat_penalty = Config.LLM.REPEAT_PENALTY
+        )
 
         val response = client.post("$baseUrl/api/chat") {
             contentType(ContentType.Application.Json)
             setBody(ChatRequest(
                 model = chatModel,
                 messages = messages,
-                stream = false
+                stream = false,
+                options = ragOptions
             ))
         }
 
@@ -124,6 +146,7 @@ class OllamaClient(
 
     /**
      * Grounded chat - строгий режим с анти-галлюцинациями
+     * Day 29: Optimized prompt and parameters for RAG
      */
     suspend fun chatGrounded(
         userMessage: String,
@@ -132,19 +155,28 @@ class OllamaClient(
         val messages = listOf(
             ChatMessage(
                 role = "system",
-                content = """You are a precise assistant that answers questions ONLY based on the provided context.
+                content = """You are a technical documentation assistant. Answer questions using ONLY the provided context.
 
-STRICT RULES:
-1. Answer ONLY using information from the context below
-2. If the context doesn't contain the answer, say "I cannot find this information in the provided documents"
-3. Do NOT add information from your general knowledge
-4. Be concise and factual
-5. Quote or paraphrase directly from the context when possible
+RULES:
+- Use ONLY facts from the context below
+- If information is missing, say "Not found in documents"
+- Be concise: 1-3 sentences when possible
+- Use technical terms from the context
+- No general knowledge or assumptions
 
-Context:
+CONTEXT:
 $context"""
             ),
             ChatMessage(role = "user", content = userMessage)
+        )
+
+        // Day 29: Lower temperature for grounded mode (more deterministic)
+        val groundedOptions = ChatOptions(
+            temperature = 0.1f,  // Very low for factual answers
+            num_predict = 256,   // Shorter answers for grounded mode
+            num_ctx = Config.LLM.CONTEXT_SIZE,
+            top_p = 0.8f,
+            repeat_penalty = 1.1f
         )
 
         val response = client.post("$baseUrl/api/chat") {
@@ -152,7 +184,8 @@ $context"""
             setBody(ChatRequest(
                 model = chatModel,
                 messages = messages,
-                stream = false
+                stream = false,
+                options = groundedOptions
             ))
         }
 
@@ -174,14 +207,24 @@ $context"""
 
     /**
      * Прямой запрос к LLM без контекста (режим PLAIN)
+     * Day 29: Higher temperature for creative responses
      */
     suspend fun chatPlain(userMessage: String): String {
         val messages = listOf(
             ChatMessage(
                 role = "system",
-                content = "You are a helpful assistant. Answer questions concisely and directly."
+                content = "You are a helpful assistant. Be concise and direct."
             ),
             ChatMessage(role = "user", content = userMessage)
+        )
+
+        // Day 29: Slightly higher temperature for plain mode (more creative)
+        val plainOptions = ChatOptions(
+            temperature = 0.5f,
+            num_predict = Config.LLM.MAX_TOKENS,
+            num_ctx = Config.LLM.CONTEXT_SIZE,
+            top_p = Config.LLM.TOP_P,
+            repeat_penalty = Config.LLM.REPEAT_PENALTY
         )
 
         val response = client.post("$baseUrl/api/chat") {
@@ -189,7 +232,8 @@ $context"""
             setBody(ChatRequest(
                 model = chatModel,
                 messages = messages,
-                stream = false
+                stream = false,
+                options = plainOptions
             ))
         }
 
@@ -211,6 +255,7 @@ $context"""
 
     /**
      * Day 25: Chat с историей диалога
+     * Day 29: Optimized for multi-turn conversations
      *
      * @param systemPrompt Динамический system prompt (от SystemPromptBuilder)
      * @param history История диалога [(role, content), ...]
@@ -234,12 +279,22 @@ $context"""
         // 3. Current user message
         messages.add(ChatMessage(role = "user", content = userMessage))
 
+        // Day 29: Memory mode needs larger context for history
+        val memoryOptions = ChatOptions(
+            temperature = 0.3f,
+            num_predict = Config.LLM.MAX_TOKENS,
+            num_ctx = Config.LLM.CONTEXT_SIZE,
+            top_p = Config.LLM.TOP_P,
+            repeat_penalty = Config.LLM.REPEAT_PENALTY
+        )
+
         val response = client.post("$baseUrl/api/chat") {
             contentType(ContentType.Application.Json)
             setBody(ChatRequest(
                 model = chatModel,
                 messages = messages,
-                stream = false
+                stream = false,
+                options = memoryOptions
             ))
         }
 
