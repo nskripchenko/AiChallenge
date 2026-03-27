@@ -27,3 +27,42 @@ object Config {
         const val REPEAT_PENALTY = 1.1f
     }
 }
+
+/**
+ * Day 29: Настройки LLM, изменяемые через UI
+ */
+data class LLMSettings(
+    val temperature: Float = Config.LLM.TEMPERATURE,
+    val maxTokens: Int = Config.LLM.MAX_TOKENS,
+    val contextSize: Int = Config.LLM.CONTEXT_SIZE,
+    val preset: LLMPreset = LLMPreset.BALANCED
+)
+
+/**
+ * Пресеты настроек LLM
+ */
+enum class LLMPreset(
+    val label: String,
+    val temperature: Float,
+    val maxTokens: Int,
+    val description: String
+) {
+    PRECISE(
+        label = "Precise",
+        temperature = 0.1f,
+        maxTokens = 256,
+        description = "Точные, короткие ответы"
+    ),
+    BALANCED(
+        label = "Balanced",
+        temperature = 0.3f,
+        maxTokens = 512,
+        description = "Баланс точности и полноты"
+    ),
+    CREATIVE(
+        label = "Creative",
+        temperature = 0.7f,
+        maxTokens = 1024,
+        description = "Развёрнутые, креативные ответы"
+    )
+}

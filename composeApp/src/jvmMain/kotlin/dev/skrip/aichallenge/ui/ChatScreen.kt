@@ -24,7 +24,11 @@ import dev.skrip.aichallenge.model.MessageRole
 import dev.skrip.aichallenge.model.QuestionMode
 import dev.skrip.aichallenge.model.RetrievalMode
 import dev.skrip.aichallenge.model.TaskState
+import dev.skrip.aichallenge.model.LLMSettings
+import dev.skrip.aichallenge.model.LLMPreset
+import dev.skrip.aichallenge.model.Config
 import kotlinx.coroutines.launch
+import kotlin.math.roundToInt
 
 @Composable
 fun ChatScreen(
@@ -55,8 +59,19 @@ fun ChatScreen(
             onGroundedModeChange = { viewModel.toggleGroundedMode(it) },
             onMemoryModeChange = { viewModel.toggleMemoryMode(it) },
             onReindex = { viewModel.reindex() },
-            onClear = { viewModel.clearMessages() }
+            onClear = { viewModel.clearMessages() },
+            onToggleSettings = { viewModel.toggleSettings() }
         )
+
+        // Day 29: LLM Settings panel
+        if (state.settingsExpanded) {
+            LLMSettingsPanel(
+                settings = state.llmSettings,
+                onPresetChange = { viewModel.applyPreset(it) },
+                onTemperatureChange = { viewModel.updateTemperature(it) },
+                onMaxTokensChange = { viewModel.updateMaxTokens(it) }
+            )
+        }
 
         // Day 25: Task State panel
         if (state.memoryEnabled && !state.taskState.isEmpty()) {
@@ -123,7 +138,8 @@ private fun TopBar(
     onGroundedModeChange: (Boolean) -> Unit,
     onMemoryModeChange: (Boolean) -> Unit,
     onReindex: () -> Unit,
-    onClear: () -> Unit
+    onClear: () -> Unit,
+    onToggleSettings: () -> Unit
 ) {
     Surface(
         modifier = Modifier.fillMaxWidth(),
@@ -153,6 +169,16 @@ private fun TopBar(
                 }
 
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    // Day 29: Settings toggle button
+                    TextButton(
+                        onClick = onToggleSettings,
+                        contentPadding = PaddingValues(horizontal = 8.dp, vertical = 4.dp)
+                    ) {
+                        Text(
+                            text = if (state.settingsExpanded) "Settings ▲" else "Settings ▼",
+                            style = MaterialTheme.typography.labelMedium
+                        )
+                    }
                     StatusChip(
                         label = if (state.ollamaAvailable) "Ollama OK" else "Ollama Offline",
                         color = if (state.ollamaAvailable) Color(0xFF4CAF50) else Color(0xFFF44336)
@@ -886,6 +912,118 @@ private fun InputArea(
                     Text("Ask")
                 }
             }
+        }
+    }
+}
+
+/** Day 29: LLM Settings Panel */
+@Composable
+private fun LLMSettingsPanel(
+    settings: LLMSettings,
+    onPresetChange: (LLMPreset) -> Unit,
+    onTemperatureChange: (Float) -> Unit,
+    onMaxTokensChange: (Int) -> Unit
+) {
+    Surface(
+        modifier = Modifier.fillMaxWidth(),
+        color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f)
+    ) {
+        Column(
+            modifier = Modifier.padding(16.dp),
+            verticalArrangement = Arrangement.spacedBy(12.dp)
+        ) {
+            // Header
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Text(
+                    text = "LLM Settings",
+                    style = MaterialTheme.typography.titleSmall,
+                    fontWeight = FontWeight.Bold
+                )
+                Text(
+                    text = "Preset: ${settings.preset.label}",
+                    style = MaterialTheme.typography.labelMedium,
+                    color = MaterialTheme.colorScheme.primary
+                )
+            }
+
+            // Presets row
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                LLMPreset.entries.forEach { preset ->
+                    FilterChip(
+                        selected = settings.preset == preset,
+                        onClick = { onPresetChange(preset) },
+                        label = {
+                            Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                                Text(preset.label, fontSize = 12.sp)
+                            }
+                        }
+                    )
+                }
+            }
+
+            // Temperature slider
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                Text(
+                    text = "Temperature:",
+                    style = MaterialTheme.typography.labelMedium,
+                    modifier = Modifier.width(100.dp)
+                )
+                Slider(
+                    value = settings.temperature,
+                    onValueChange = onTemperatureChange,
+                    valueRange = 0f..1f,
+                    steps = 9,
+                    modifier = Modifier.weight(1f)
+                )
+                Text(
+                    text = "%.1f".format(settings.temperature),
+                    style = MaterialTheme.typography.labelMedium,
+                    modifier = Modifier.width(40.dp)
+                )
+            }
+
+            // Max tokens slider
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                Text(
+                    text = "Max Tokens:",
+                    style = MaterialTheme.typography.labelMedium,
+                    modifier = Modifier.width(100.dp)
+                )
+                Slider(
+                    value = settings.maxTokens.toFloat(),
+                    onValueChange = { onMaxTokensChange(it.roundToInt()) },
+                    valueRange = 128f..2048f,
+                    steps = 14,
+                    modifier = Modifier.weight(1f)
+                )
+                Text(
+                    text = settings.maxTokens.toString(),
+                    style = MaterialTheme.typography.labelMedium,
+                    modifier = Modifier.width(50.dp)
+                )
+            }
+
+            // Info text
+            Text(
+                text = settings.preset.description,
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f)
+            )
         }
     }
 }

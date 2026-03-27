@@ -32,11 +32,12 @@ class RagService(
 
     /**
      * Ответ в режиме PLAIN - прямой запрос к LLM без retrieval
+     * @param settings Day 29: UI-configurable LLM settings
      */
-    suspend fun askPlain(query: String): AnswerResult {
+    suspend fun askPlain(query: String, settings: LLMSettings? = null): AnswerResult {
         val startTime = System.currentTimeMillis()
 
-        val answer = ollamaClient.chatPlain(query)
+        val answer = ollamaClient.chatPlain(query, settings)
 
         return AnswerResult(
             query = query,
@@ -49,11 +50,13 @@ class RagService(
 
     /**
      * Grounded RAG ответ с цитатами, источниками и fallback
+     * @param settings Day 29: UI-configurable LLM settings
      */
     suspend fun askGrounded(
         query: String,
         index: DocumentIndex,
-        retrievalMode: RetrievalMode = RetrievalMode.BASELINE
+        retrievalMode: RetrievalMode = RetrievalMode.BASELINE,
+        settings: LLMSettings? = null
     ): GroundedAnswer {
         val startTime = System.currentTimeMillis()
 
@@ -94,7 +97,7 @@ class RagService(
 
         // 6. Build context и генерируем ответ
         val context = buildContextFromEnhanced(retrievalResult.results)
-        val answer = ollamaClient.chatGrounded(query, context)
+        val answer = ollamaClient.chatGrounded(query, context, settings)
 
         return GroundedAnswer(
             query = query,
@@ -111,6 +114,7 @@ class RagService(
 
     /**
      * Day 25: RAG ответ с памятью диалога
+     * Day 29: Supports UI-configurable LLM settings
      *
      * Учитывает историю диалога и task state при генерации ответа.
      */
@@ -119,7 +123,8 @@ class RagService(
         index: DocumentIndex,
         memory: ConversationMemory,
         retrievalMode: RetrievalMode = RetrievalMode.BASELINE,
-        isGrounded: Boolean = true
+        isGrounded: Boolean = true,
+        settings: LLMSettings? = null
     ): MemoryAnswerResult {
         val startTime = System.currentTimeMillis()
 
@@ -178,7 +183,7 @@ class RagService(
         )
 
         // 9. Generate answer with history
-        val answer = ollamaClient.chatWithHistory(systemPrompt, history, query)
+        val answer = ollamaClient.chatWithHistory(systemPrompt, history, query, settings)
 
         // 10. Update task state from answer
         val finalTaskState = taskStateExtractor.updateFromAssistantAnswer(answer, updatedTaskState)
@@ -208,10 +213,12 @@ class RagService(
 
     /**
      * Day 25: Plain режим с памятью диалога
+     * Day 29: Supports UI-configurable LLM settings
      */
     suspend fun askPlainWithMemory(
         query: String,
-        memory: ConversationMemory
+        memory: ConversationMemory,
+        settings: LLMSettings? = null
     ): MemoryAnswerResult {
         val startTime = System.currentTimeMillis()
 
@@ -231,7 +238,7 @@ class RagService(
         )
 
         // 4. Generate answer with history
-        val answer = ollamaClient.chatWithHistory(systemPrompt, history, query)
+        val answer = ollamaClient.chatWithHistory(systemPrompt, history, query, settings)
 
         // 5. Update task state from answer
         val finalTaskState = taskStateExtractor.updateFromAssistantAnswer(answer, updatedTaskState)
@@ -251,11 +258,13 @@ class RagService(
 
     /**
      * Ответ в режиме RAG с improved retrieval pipeline
+     * Day 29: Supports UI-configurable LLM settings
      */
     suspend fun askRag(
         query: String,
         index: DocumentIndex,
-        retrievalMode: RetrievalMode = RetrievalMode.BASELINE
+        retrievalMode: RetrievalMode = RetrievalMode.BASELINE,
+        settings: LLMSettings? = null
     ): AnswerResult {
         val startTime = System.currentTimeMillis()
 
@@ -266,7 +275,7 @@ class RagService(
         val context = buildContextFromEnhanced(retrievalResult.results)
 
         // 3. Generate answer
-        val answer = ollamaClient.chat(query, context)
+        val answer = ollamaClient.chat(query, context, settings)
 
         // 4. Convert to AnswerSource
         val sources = retrievalResult.results.map { result ->
@@ -291,25 +300,27 @@ class RagService(
 
     /**
      * Универсальный метод для всех режимов
+     * Day 29: Supports UI-configurable LLM settings
      */
     suspend fun ask(
         query: String,
         mode: QuestionMode,
         index: DocumentIndex?,
-        retrievalMode: RetrievalMode = RetrievalMode.BASELINE
+        retrievalMode: RetrievalMode = RetrievalMode.BASELINE,
+        settings: LLMSettings? = null
     ): AnswerResult {
         return when (mode) {
-            QuestionMode.PLAIN -> askPlain(query)
+            QuestionMode.PLAIN -> askPlain(query, settings)
             QuestionMode.RAG -> {
                 requireNotNull(index) { "Index required for RAG mode" }
-                askRag(query, index, retrievalMode)
+                askRag(query, index, retrievalMode, settings)
             }
         }
     }
 
     // Legacy method for compatibility (без retrievalMode)
     suspend fun ask(query: String, mode: QuestionMode, index: DocumentIndex?): AnswerResult {
-        return ask(query, mode, index, RetrievalMode.BASELINE)
+        return ask(query, mode, index, RetrievalMode.BASELINE, null)
     }
 
     private fun buildContextFromEnhanced(results: List<EnhancedSearchResult>): String {
@@ -346,12 +357,13 @@ class RagService(
 
     suspend fun ask(
         query: String,
-        index: DocumentIndex
+        index: DocumentIndex,
+        settings: LLMSettings? = null
     ): RagResponse {
         val queryEmbedding = ollamaClient.getEmbedding(query)
         val searchResults = search.search(queryEmbedding, index, config.topKAfterFiltering)
         val context = buildContext(searchResults)
-        val answer = ollamaClient.chat(query, context)
+        val answer = ollamaClient.chat(query, context, settings)
 
         return RagResponse(
             answer = answer,
@@ -362,10 +374,11 @@ class RagService(
 
     suspend fun askWithProvidedContext(
         query: String,
-        searchResults: List<SearchResult>
+        searchResults: List<SearchResult>,
+        settings: LLMSettings? = null
     ): RagResponse {
         val context = buildContext(searchResults)
-        val answer = ollamaClient.chat(query, context)
+        val answer = ollamaClient.chat(query, context, settings)
 
         return RagResponse(
             answer = answer,

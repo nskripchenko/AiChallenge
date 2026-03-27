@@ -30,7 +30,11 @@ data class ChatState(
     val conversationId: String = UUID.randomUUID().toString(),
     val indexStatus: IndexStatus? = null,
     val ollamaAvailable: Boolean = false,
-    val error: String? = null
+    val error: String? = null,
+    /** Day 29: LLM settings */
+    val llmSettings: LLMSettings = LLMSettings(),
+    /** Day 29: Settings panel expanded */
+    val settingsExpanded: Boolean = false
 )
 
 data class IndexStatus(
@@ -106,6 +110,40 @@ class ChatViewModel : ViewModel() {
     /** Day 25: Включить/выключить режим памяти */
     fun toggleMemoryMode(enabled: Boolean) {
         _state.value = _state.value.copy(memoryEnabled = enabled)
+    }
+
+    /** Day 29: Toggle settings panel */
+    fun toggleSettings() {
+        _state.value = _state.value.copy(settingsExpanded = !_state.value.settingsExpanded)
+    }
+
+    /** Day 29: Update LLM settings */
+    fun updateLLMSettings(settings: LLMSettings) {
+        _state.value = _state.value.copy(llmSettings = settings)
+    }
+
+    /** Day 29: Apply preset */
+    fun applyPreset(preset: LLMPreset) {
+        val newSettings = _state.value.llmSettings.copy(
+            temperature = preset.temperature,
+            maxTokens = preset.maxTokens,
+            preset = preset
+        )
+        _state.value = _state.value.copy(llmSettings = newSettings)
+    }
+
+    /** Day 29: Update temperature */
+    fun updateTemperature(temp: Float) {
+        _state.value = _state.value.copy(
+            llmSettings = _state.value.llmSettings.copy(temperature = temp)
+        )
+    }
+
+    /** Day 29: Update max tokens */
+    fun updateMaxTokens(tokens: Int) {
+        _state.value = _state.value.copy(
+            llmSettings = _state.value.llmSettings.copy(maxTokens = tokens)
+        )
     }
 
     /** Day 25: Начать новый диалог (сбросить память) */
@@ -228,7 +266,8 @@ class ChatViewModel : ViewModel() {
         retrievalMode: RetrievalMode,
         modeLabel: String
     ) {
-        val result = ragService.askGrounded(question, index, retrievalMode)
+        val settings = _state.value.llmSettings
+        val result = ragService.askGrounded(question, index, retrievalMode, settings)
 
         // Convert sources to SearchResult for compatibility
         val searchResults = result.sources.map { source ->
@@ -276,7 +315,8 @@ class ChatViewModel : ViewModel() {
         retrievalMode: RetrievalMode,
         modeLabel: String
     ) {
-        val result = ragService.ask(question, mode, index, retrievalMode)
+        val settings = _state.value.llmSettings
+        val result = ragService.ask(question, mode, index, retrievalMode, settings)
 
         // Convert AnswerSource to SearchResult for compatibility
         val searchResults = result.sources.map { source ->
@@ -326,10 +366,11 @@ class ChatViewModel : ViewModel() {
         // Update memory with user message before calling LLM
         conversationMemory = conversationMemory.addUserMessage(question)
 
+        val settings = _state.value.llmSettings
         val result = if (mode == QuestionMode.RAG && index != null) {
-            ragService.askWithMemory(question, index, conversationMemory, retrievalMode, groundedMode)
+            ragService.askWithMemory(question, index, conversationMemory, retrievalMode, groundedMode, settings)
         } else {
-            ragService.askPlainWithMemory(question, conversationMemory)
+            ragService.askPlainWithMemory(question, conversationMemory, settings)
         }
 
         // Update memory with assistant response

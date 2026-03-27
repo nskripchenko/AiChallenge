@@ -1,6 +1,7 @@
 package dev.skrip.aichallenge.ollama
 
 import dev.skrip.aichallenge.model.Config
+import dev.skrip.aichallenge.model.LLMSettings
 import io.ktor.client.*
 import io.ktor.client.call.*
 import io.ktor.client.engine.cio.*
@@ -31,7 +32,18 @@ data class ChatOptions(
     val num_ctx: Int = Config.LLM.CONTEXT_SIZE,
     val top_p: Float = Config.LLM.TOP_P,
     val repeat_penalty: Float = Config.LLM.REPEAT_PENALTY
-)
+) {
+    companion object {
+        /** Create ChatOptions from UI LLMSettings */
+        fun fromSettings(settings: LLMSettings) = ChatOptions(
+            temperature = settings.temperature,
+            num_predict = settings.maxTokens,
+            num_ctx = settings.contextSize,
+            top_p = Config.LLM.TOP_P,
+            repeat_penalty = Config.LLM.REPEAT_PENALTY
+        )
+    }
+}
 
 @Serializable
 data class ChatRequest(
@@ -87,10 +99,12 @@ class OllamaClient(
 
     /**
      * Day 29: Optimized RAG chat with context
+     * @param settings UI-configurable LLM settings
      */
     suspend fun chat(
         userMessage: String,
-        context: String? = null
+        context: String? = null,
+        settings: LLMSettings? = null
     ): String {
         val messages = mutableListOf<ChatMessage>()
 
@@ -107,14 +121,8 @@ $context"""
 
         messages.add(ChatMessage(role = "user", content = userMessage))
 
-        // Day 29: Optimized parameters for RAG
-        val ragOptions = ChatOptions(
-            temperature = 0.3f,
-            num_predict = Config.LLM.MAX_TOKENS,
-            num_ctx = Config.LLM.CONTEXT_SIZE,
-            top_p = Config.LLM.TOP_P,
-            repeat_penalty = Config.LLM.REPEAT_PENALTY
-        )
+        // Day 29: Use UI settings or defaults
+        val options = settings?.let { ChatOptions.fromSettings(it) } ?: ChatOptions()
 
         val response = client.post("$baseUrl/api/chat") {
             contentType(ContentType.Application.Json)
@@ -122,7 +130,7 @@ $context"""
                 model = chatModel,
                 messages = messages,
                 stream = false,
-                options = ragOptions
+                options = options
             ))
         }
 
@@ -147,10 +155,12 @@ $context"""
     /**
      * Grounded chat - строгий режим с анти-галлюцинациями
      * Day 29: Optimized prompt and parameters for RAG
+     * @param settings UI settings (temperature will be lowered for grounded mode)
      */
     suspend fun chatGrounded(
         userMessage: String,
-        context: String
+        context: String,
+        settings: LLMSettings? = null
     ): String {
         val messages = listOf(
             ChatMessage(
@@ -170,13 +180,11 @@ $context"""
             ChatMessage(role = "user", content = userMessage)
         )
 
-        // Day 29: Lower temperature for grounded mode (more deterministic)
-        val groundedOptions = ChatOptions(
-            temperature = 0.1f,  // Very low for factual answers
-            num_predict = 256,   // Shorter answers for grounded mode
-            num_ctx = Config.LLM.CONTEXT_SIZE,
-            top_p = 0.8f,
-            repeat_penalty = 1.1f
+        // Day 29: Grounded mode uses lower temperature for accuracy
+        val baseOptions = settings?.let { ChatOptions.fromSettings(it) } ?: ChatOptions()
+        val groundedOptions = baseOptions.copy(
+            temperature = minOf(baseOptions.temperature, 0.2f),  // Cap temperature for grounded
+            num_predict = minOf(baseOptions.num_predict, 512)
         )
 
         val response = client.post("$baseUrl/api/chat") {
@@ -207,9 +215,9 @@ $context"""
 
     /**
      * Прямой запрос к LLM без контекста (режим PLAIN)
-     * Day 29: Higher temperature for creative responses
+     * Day 29: Uses UI settings
      */
-    suspend fun chatPlain(userMessage: String): String {
+    suspend fun chatPlain(userMessage: String, settings: LLMSettings? = null): String {
         val messages = listOf(
             ChatMessage(
                 role = "system",
@@ -218,14 +226,8 @@ $context"""
             ChatMessage(role = "user", content = userMessage)
         )
 
-        // Day 29: Slightly higher temperature for plain mode (more creative)
-        val plainOptions = ChatOptions(
-            temperature = 0.5f,
-            num_predict = Config.LLM.MAX_TOKENS,
-            num_ctx = Config.LLM.CONTEXT_SIZE,
-            top_p = Config.LLM.TOP_P,
-            repeat_penalty = Config.LLM.REPEAT_PENALTY
-        )
+        // Day 29: Use UI settings or defaults
+        val options = settings?.let { ChatOptions.fromSettings(it) } ?: ChatOptions()
 
         val response = client.post("$baseUrl/api/chat") {
             contentType(ContentType.Application.Json)
@@ -233,7 +235,7 @@ $context"""
                 model = chatModel,
                 messages = messages,
                 stream = false,
-                options = plainOptions
+                options = options
             ))
         }
 
@@ -255,16 +257,18 @@ $context"""
 
     /**
      * Day 25: Chat с историей диалога
-     * Day 29: Optimized for multi-turn conversations
+     * Day 29: Uses UI settings
      *
      * @param systemPrompt Динамический system prompt (от SystemPromptBuilder)
      * @param history История диалога [(role, content), ...]
      * @param userMessage Текущее сообщение пользователя
+     * @param settings UI-configurable LLM settings
      */
     suspend fun chatWithHistory(
         systemPrompt: String,
         history: List<Pair<String, String>>,
-        userMessage: String
+        userMessage: String,
+        settings: LLMSettings? = null
     ): String {
         val messages = mutableListOf<ChatMessage>()
 
@@ -279,14 +283,8 @@ $context"""
         // 3. Current user message
         messages.add(ChatMessage(role = "user", content = userMessage))
 
-        // Day 29: Memory mode needs larger context for history
-        val memoryOptions = ChatOptions(
-            temperature = 0.3f,
-            num_predict = Config.LLM.MAX_TOKENS,
-            num_ctx = Config.LLM.CONTEXT_SIZE,
-            top_p = Config.LLM.TOP_P,
-            repeat_penalty = Config.LLM.REPEAT_PENALTY
-        )
+        // Day 29: Use UI settings or defaults
+        val options = settings?.let { ChatOptions.fromSettings(it) } ?: ChatOptions()
 
         val response = client.post("$baseUrl/api/chat") {
             contentType(ContentType.Application.Json)
@@ -294,7 +292,7 @@ $context"""
                 model = chatModel,
                 messages = messages,
                 stream = false,
-                options = memoryOptions
+                options = options
             ))
         }
 
